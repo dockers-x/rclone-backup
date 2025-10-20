@@ -1,17 +1,16 @@
-version: '3.4'
+version: "3.4"
 
 services:
-
   vaultwarden:
     image: service:latest
     ports:
-      - '127.0.0.1:8200:80'
+      - "127.0.0.1:8200:80"
     volumes:
       - service-data:/data
       - service-database:/database
 
   backup:
-    image: adrienpoupa/rclone-backup:latest
+    image: czyt/rclone-backup:latest
     # environment:
     #   RCLONE_REMOTE_NAME: 'RcloneBackup'
     #   RCLONE_REMOTE_DIR: '/RcloneBackup/'
@@ -32,6 +31,11 @@ services:
     #   MAIL_TO: ''
     #   MAIL_WHEN_SUCCESS: 'TRUE'
     #   MAIL_WHEN_FAILURE: 'TRUE'
+    #   SERVERCHAN_ENABLE: 'FALSE'
+    #   SERVERCHAN_SENDKEY: ''
+    #   SERVERCHAN_WHEN_START: 'TRUE'
+    #   SERVERCHAN_WHEN_SUCCESS: 'TRUE'
+    #   SERVERCHAN_WHEN_FAILURE: 'TRUE'
     #   TIMEZONE: 'UTC'
     volumes:
       - rclone-backup-data:/config

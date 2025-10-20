@@ -137,6 +137,54 @@ function send_mail() {
 }
 
 ########################################
+# Send ServerChan notification.
+# Arguments:
+#     text (title)
+#     desp (content)
+# Outputs:
+#     send result
+########################################
+function send_serverchan() {
+    local text="$1"
+    local desp="$2"
+    local key="${SERVERCHAN_SENDKEY}"
+
+    if [[ -z "${key}" ]]; then
+        return
+    fi
+
+    local postdata="text=${text}&desp=${desp}"
+    local url=""
+    local opts=(
+        "-X" "POST"
+        "-s"
+        "-o" "/dev/null"
+        "-w" "%{http_code}"
+        "--header" "Content-type: application/x-www-form-urlencoded"
+        "--data" "${postdata}"
+    )
+
+    # Check if key starts with "sctp" to determine URL
+    if [[ "${key}" =~ ^sctp([0-9]+)t ]]; then
+        local num="${BASH_REMATCH[1]}"
+        url="https://${num}.push.ft07.com/send/${key}.send"
+    else
+        url="https://sctapi.ftqq.com/${key}.send"
+    fi
+
+    if [[ "${SERVERCHAN_DEBUG}" == "TRUE" ]]; then
+        color yellow "ServerChan URL: ${url}"
+    fi
+
+    local result=$(curl -m 15 --retry 3 --retry-delay 1 "${opts[@]}" "${url}")
+    if [[ "${result}" == "200" ]]; then
+        color blue "ServerChan notification has been sent successfully"
+    else
+        color red "ServerChan notification sending has failed (HTTP ${result})"
+    fi
+}
+
+########################################
 # Send health check ping.
 # Arguments:
 #     None
@@ -190,6 +238,10 @@ function send_notification() {
 
     case "$1" in
         start)
+            # serverchan
+            if [[ "${SERVERCHAN_ENABLE}" == "TRUE" && "${SERVERCHAN_WHEN_START}" == "TRUE" ]]; then
+                send_serverchan "${SUBJECT_START}" "$2"
+            fi
             # ping
             send_ping "start" "${SUBJECT_START}" "$2"
             ;;
@@ -197,6 +249,10 @@ function send_notification() {
             # mail
             if [[ "${MAIL_SMTP_ENABLE}" == "TRUE" && "${MAIL_WHEN_SUCCESS}" == "TRUE" ]]; then
                 send_mail "${SUBJECT_SUCCESS}" "$2"
+            fi
+            # serverchan
+            if [[ "${SERVERCHAN_ENABLE}" == "TRUE" && "${SERVERCHAN_WHEN_SUCCESS}" == "TRUE" ]]; then
+                send_serverchan "${SUBJECT_SUCCESS}" "$2"
             fi
             # ping
             send_ping "success" "${SUBJECT_SUCCESS}" "$2"
@@ -206,6 +262,10 @@ function send_notification() {
             # mail
             if [[ "${MAIL_SMTP_ENABLE}" == "TRUE" && "${MAIL_WHEN_FAILURE}" == "TRUE" ]]; then
                 send_mail "${SUBJECT_FAILURE}" "$2"
+            fi
+            # serverchan
+            if [[ "${SERVERCHAN_ENABLE}" == "TRUE" && "${SERVERCHAN_WHEN_FAILURE}" == "TRUE" ]]; then
+                send_serverchan "${SUBJECT_FAILURE}" "$2"
             fi
             # ping
             send_ping "failure" "${SUBJECT_FAILURE}" "$2"
@@ -356,6 +416,7 @@ function init_env() {
     init_env_display
     init_env_ping
     init_env_mail
+    init_env_serverchan
 
     # CRON
     get_env CRON
@@ -490,6 +551,13 @@ function init_env() {
         color yellow "MAIL_WHEN_SUCCESS: ${MAIL_WHEN_SUCCESS}"
         color yellow "MAIL_WHEN_FAILURE: ${MAIL_WHEN_FAILURE}"
     fi
+    color yellow "SERVERCHAN_ENABLE: ${SERVERCHAN_ENABLE}"
+    if [[ "${SERVERCHAN_ENABLE}" == "TRUE" ]]; then
+        color yellow "SERVERCHAN_SENDKEY: ${SERVERCHAN_SENDKEY:0:10}***"
+        color yellow "SERVERCHAN_WHEN_START: ${SERVERCHAN_WHEN_START}"
+        color yellow "SERVERCHAN_WHEN_SUCCESS: ${SERVERCHAN_WHEN_SUCCESS}"
+        color yellow "SERVERCHAN_WHEN_FAILURE: ${SERVERCHAN_WHEN_FAILURE}"
+    fi
     color yellow "TIMEZONE: ${TIMEZONE}"
     color yellow "DISPLAY_NAME: ${DISPLAY_NAME}"
     color yellow "========================================"
@@ -616,5 +684,50 @@ function init_env_mail() {
         MAIL_WHEN_FAILURE="FALSE"
     else
         MAIL_WHEN_FAILURE="TRUE"
+    fi
+}
+
+function init_env_serverchan() {
+    # SERVERCHAN_ENABLE
+    # SERVERCHAN_SENDKEY
+    get_env SERVERCHAN_ENABLE
+    get_env SERVERCHAN_SENDKEY
+    SERVERCHAN_ENABLE=$(echo "${SERVERCHAN_ENABLE}" | tr '[a-z]' '[A-Z]')
+    if [[ "${SERVERCHAN_ENABLE}" == "TRUE" && "${SERVERCHAN_SENDKEY}" ]]; then
+        SERVERCHAN_ENABLE="TRUE"
+    else
+        SERVERCHAN_ENABLE="FALSE"
+    fi
+
+    # SERVERCHAN_WHEN_START
+    get_env SERVERCHAN_WHEN_START
+    if [[ "${SERVERCHAN_WHEN_START^^}" == "FALSE" ]]; then
+        SERVERCHAN_WHEN_START="FALSE"
+    else
+        SERVERCHAN_WHEN_START="TRUE"
+    fi
+
+    # SERVERCHAN_WHEN_SUCCESS
+    get_env SERVERCHAN_WHEN_SUCCESS
+    if [[ "${SERVERCHAN_WHEN_SUCCESS^^}" == "FALSE" ]]; then
+        SERVERCHAN_WHEN_SUCCESS="FALSE"
+    else
+        SERVERCHAN_WHEN_SUCCESS="TRUE"
+    fi
+
+    # SERVERCHAN_WHEN_FAILURE
+    get_env SERVERCHAN_WHEN_FAILURE
+    if [[ "${SERVERCHAN_WHEN_FAILURE^^}" == "FALSE" ]]; then
+        SERVERCHAN_WHEN_FAILURE="FALSE"
+    else
+        SERVERCHAN_WHEN_FAILURE="TRUE"
+    fi
+
+    # SERVERCHAN_DEBUG
+    get_env SERVERCHAN_DEBUG
+    if [[ "${SERVERCHAN_DEBUG^^}" == "TRUE" ]]; then
+        SERVERCHAN_DEBUG="TRUE"
+    else
+        SERVERCHAN_DEBUG="FALSE"
     fi
 }

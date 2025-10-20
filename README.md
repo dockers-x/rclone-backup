@@ -100,7 +100,7 @@ You can view the current remote name with the following command.
 ```shell
 docker run --rm -it \
   --mount type=volume,source=rclone-backup-data,target=/config/ \
-  adrienpoupa/rclone-backup:latest \
+  czyt/rclone-backup:latest \
   rclone config show
 
 # [RcloneBackup] <- this
@@ -283,7 +283,7 @@ docker run --rm -it \
   -e PING_URL_WHEN_SUCCESS_CURL_OPTIONS='<your curl options for PING_URL_WHEN_SUCCESS>' \
   -e PING_URL_WHEN_FAILURE='<your ping url>' \
   -e PING_URL_WHEN_FAILURE_CURL_OPTIONS='<your curl options for PING_URL_WHEN_FAILURE>' \
-  adrienpoupa/rclone-backup:latest ping <test identifier>
+  czyt/rclone-backup:latest ping <test identifier>
 ```
 
 <br>
@@ -339,7 +339,7 @@ If you prefer using an env file instead of environment variables, you can map th
 ```shell
 docker run -d \
   --mount type=bind,source=/path/to/env,target=/.env \
-  adrienpoupa/rclone-backup:latest
+  czyt/rclone-backup:latest
 ```
 
 ### Docker Secrets
@@ -349,7 +349,7 @@ As an alternative to passing sensitive information via environment variables, `_
 ```shell
 docker run -d \
   -e ZIP_PASSWORD_FILE=/run/secrets/zip-password \
-  adrienpoupa/rclone-backup:latest
+  czyt/rclone-backup:latest
 ```
 
 ### About Priority
