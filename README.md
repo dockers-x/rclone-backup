@@ -176,7 +176,15 @@ Default: `zip` (only support `zip` and `7z` formats)
 
 #### BACKUP_KEEP_DAYS
 
-Only keep last a few days backup files in the storage system. Set to `0` to keep all backup files.
+Only keep backup files from the last few days in the storage system. Set to `0` to disable cleanup by days.
+
+Default: `0`
+
+#### BACKUP_KEEP_COUNT
+
+Keep only the specified number of latest backup files in the storage system. Set to `0` to disable cleanup by count. When enabled, only the N most recent backups will be retained, and older ones will be deleted regardless of their age.
+
+**Note:** This option works independently from `BACKUP_KEEP_DAYS`. You can use both options together, or use only one of them.
 
 Default: `0`
 

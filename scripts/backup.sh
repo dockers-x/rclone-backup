@@ -165,9 +165,10 @@ function upload() {
 }
 
 function clear_history() {
-    if [[ "${BACKUP_KEEP_DAYS}" -gt 0 ]]; then
-        for RCLONE_REMOTE_X in "${RCLONE_REMOTE_LIST[@]}"
-        do
+    for RCLONE_REMOTE_X in "${RCLONE_REMOTE_LIST[@]}"
+    do
+        # Clear by days
+        if [[ "${BACKUP_KEEP_DAYS}" -gt 0 ]]; then
             color blue "Delete backup files from ${BACKUP_KEEP_DAYS} days ago $(color yellow "[${RCLONE_REMOTE_X}]")"
 
             mapfile -t RCLONE_DELETE_LIST < <(rclone ${RCLONE_GLOBAL_FLAG} lsf "${RCLONE_REMOTE_X}" --min-age "${BACKUP_KEEP_DAYS}d")
@@ -181,8 +182,34 @@ function clear_history() {
                     color red "Deleting \"${RCLONE_DELETE_FILE}\" failed"
                 fi
             done
-        done
-    fi
+        fi
+
+        # Clear by count - keep only the latest N backups
+        if [[ "${BACKUP_KEEP_COUNT}" -gt 0 ]]; then
+            color blue "Keep only the latest ${BACKUP_KEEP_COUNT} backup(s) $(color yellow "[${RCLONE_REMOTE_X}]")"
+
+            # Get all files sorted by modification time (newest first)
+            mapfile -t ALL_BACKUPS < <(rclone ${RCLONE_GLOBAL_FLAG} lsf "${RCLONE_REMOTE_X}" --format "tp" | sort -r | cut -d';' -f2)
+
+            local TOTAL_BACKUPS=${#ALL_BACKUPS[@]}
+
+            if [[ "${TOTAL_BACKUPS}" -gt "${BACKUP_KEEP_COUNT}" ]]; then
+                # Delete files beyond the keep count
+                for ((i=BACKUP_KEEP_COUNT; i<TOTAL_BACKUPS; i++))
+                do
+                    local DELETE_FILE="${ALL_BACKUPS[$i]}"
+                    color yellow "Deleting \"${DELETE_FILE}\""
+
+                    rclone ${RCLONE_GLOBAL_FLAG} delete "${RCLONE_REMOTE_X}/${DELETE_FILE}"
+                    if [[ $? != 0 ]]; then
+                        color red "Deleting \"${DELETE_FILE}\" failed"
+                    fi
+                done
+            else
+                color blue "Current backup count (${TOTAL_BACKUPS}) is within limit (${BACKUP_KEEP_COUNT}), no deletion needed"
+            fi
+        fi
+    done
 }
 
 color blue "Running the backup program at $(date +"%Y-%m-%d %H:%M:%S %Z")"

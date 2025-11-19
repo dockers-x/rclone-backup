@@ -465,6 +465,10 @@ function init_env() {
     get_env BACKUP_KEEP_DAYS
     BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-"0"}"
 
+    # BACKUP_KEEP_COUNT
+    get_env BACKUP_KEEP_COUNT
+    BACKUP_KEEP_COUNT="${BACKUP_KEEP_COUNT:-"0"}"
+
     # BACKUP_FILE_DATE_FORMAT
     get_env BACKUP_FILE_SUFFIX
     get_env BACKUP_FILE_DATE
@@ -533,6 +537,7 @@ function init_env() {
     color yellow "ZIP_TYPE: ${ZIP_TYPE}"
     color yellow "BACKUP_FILE_DATE_FORMAT: ${BACKUP_FILE_DATE_FORMAT} (example \"[filename].$(date +"${BACKUP_FILE_DATE_FORMAT}").[ext]\")"
     color yellow "BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS}"
+    color yellow "BACKUP_KEEP_COUNT: ${BACKUP_KEEP_COUNT}"
     if [[ -n "${PING_URL}" ]]; then
         color yellow "PING_URL: curl${PING_URL_CURL_OPTIONS:+" ${PING_URL_CURL_OPTIONS}"} \"${PING_URL}\""
     fi
