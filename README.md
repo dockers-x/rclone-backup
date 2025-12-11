@@ -2,7 +2,7 @@
 
 [![Docker Image Version (latest by date)](https://img.shields.io/docker/v/adrienpoupa/rclone-backup?label=Version&logo=docker)](https://hub.docker.com/r/adrienpoupa/rclone-backup/tags) [![Docker Pulls](https://img.shields.io/docker/pulls/adrienpoupa/rclone-backup?label=Docker%20Pulls&logo=docker)](https://hub.docker.com/r/adrienpoupa/rclone-backup) [![GitHub](https://img.shields.io/github/license/adrienpoupa/rclone-backup?label=License&logo=github)](https://github.com/AdrienPoupa/rclone-backup/blob/master/LICENSE)
 
-Forked from [ttionya/vaultwarden-backup](https://github.com/ttionya/vaultwarden-backup).
+Forked from [AdrienPoupa/rclone-backup](https://github.com/AdrienPoupa/rclone-backup) which forks [ttionya/vaultwarden-backup](https://github.com/ttionya/vaultwarden-backup).
 
 This tool supports backing up the following files or directories.
 
