@@ -1,4 +1,4 @@
-FROM rclone/rclone:1.72.0
+FROM rclone/rclone:1.73.0
 
 ARG USER_NAME="backuptool"
 ARG USER_ID="1100"
