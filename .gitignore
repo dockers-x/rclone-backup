@@ -8,3 +8,14 @@
 # Log
 *.log
 *.log.*
+
+# Rust
+/target/
+
+# Runtime state
+*.db
+*.db-shm
+*.db-wal
+
+# Web research cache
+/.firecrawl/

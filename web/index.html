@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Rclone Backup</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip">跳到主要内容</a>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-drive" viewBox="0 0 24 24"><path d="M4 15.5 7.5 5h9L20 15.5M4 15.5h16v3.2a1.3 1.3 0 0 1-1.3 1.3H5.3A1.3 1.3 0 0 1 4 18.7v-3.2Zm3.5 0h9M16.5 17.8h.01"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 6 9 6-9 6V6Z"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m14.5 5.5 4 4M4 20l1-4L16.5 4.5a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2L8 19l-4 1Z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M9 7V4h6v3m2 0-1 13H8L7 7m3 4v5m4-5v5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.2 2.5 3.3 5.5 3.3 9S14.2 18.5 12 21c-2.2-2.5-3.3-5.5-3.3-9S9.8 5.5 12 3Z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2-5.3L4 9m0-5v5h5M12 8v5l3 2"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary">
+      <div class="brand"><span class="brand-mark"><svg><use href="#i-drive"/></svg></span><span><strong>Rclone</strong><small>BACKUP CONTROL</small></span></div>
+      <nav>
+        <a class="nav-item active" href="#plans"><svg><use href="#i-drive"/></svg><span data-i18n="plans">备份方案</span></a>
+        <a class="nav-item" href="#accounts"><svg><use href="#i-globe"/></svg><span data-i18n="storageAccounts">存储账号</span></a>
+        <a class="nav-item" href="#history"><svg><use href="#i-history"/></svg><span data-i18n="history">运行历史</span></a>
+      </nav>
+      <div class="sidebar-foot"><span class="status-dot"></span><span data-i18n="serviceOnline">服务在线</span><small id="version">v2.0.0</small></div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="menuButton" aria-label="打开菜单"><svg><use href="#i-menu"/></svg></button>
+        <div><p class="eyebrow" data-i18n="workspace">工作空间</p><h1 data-i18n="dashboard">备份控制台</h1></div>
+        <div class="top-actions">
+          <button class="icon-button" id="themeButton" data-tooltip="切换主题" aria-label="切换主题"><svg><use href="#i-sun"/></svg></button>
+          <button class="language-button" id="languageButton" aria-label="Switch language"><svg><use href="#i-globe"/></svg><span>中文</span></button>
+          <button class="button primary" id="newPlanButton"><svg><use href="#i-plus"/></svg><span data-i18n="newPlan">新建方案</span></button>
+        </div>
+      </header>
+
+      <main id="main">
+        <section class="readiness-banner" id="readinessBanner" hidden>
+          <div class="readiness-icon"><svg><use href="#i-drive"/></svg></div>
+          <div><strong data-i18n="rcloneWaiting">等待配置存储</strong><p data-i18n="rcloneWaitingHint">服务会保持运行，但在检测到至少一个 rclone 远端前不会启动任何备份任务。</p></div>
+          <button class="button primary" id="configureRemoteButton" data-i18n="configureStorage">配置存储</button>
+        </section>
+        <section class="hero" aria-labelledby="page-title">
+          <div><p class="eyebrow" data-i18n="overview">运行概览</p><h2 id="page-title" data-i18n="allBackups">所有备份，一目了然</h2><p data-i18n="subtitle">编排本地目录备份，通过 rclone 安全同步到任意远端。</p></div>
+          <div class="hero-status"><span class="pulse"></span><span data-i18n="schedulerActive">调度器正在运行</span></div>
+        </section>
+
+        <section class="metrics" aria-label="Metrics">
+          <article class="metric"><span data-i18n="activePlans">启用方案</span><strong id="activeCount">—</strong><small data-i18n="automatic">自动调度</small></article>
+          <article class="metric"><span data-i18n="last24">近 24 小时</span><strong id="successCount">—</strong><small data-i18n="successRuns">次成功运行</small></article>
+          <article class="metric"><span data-i18n="successRate">成功率</span><strong id="successRate">—</strong><small data-i18n="recentRuns">最近运行</small></article>
+          <article class="metric"><span data-i18n="destinations">远端目标</span><strong id="remoteCount">—</strong><small>rclone</small></article>
+        </section>
+
+        <section class="section-block" id="plans">
+          <div class="section-heading"><div><p class="eyebrow" data-i18n="configuration">配置</p><h2 data-i18n="backupPlans">备份方案</h2></div><span class="count-chip" id="planCount">0</span></div>
+          <div class="plan-grid" id="planGrid" aria-live="polite">
+            <div class="skeleton"></div><div class="skeleton"></div>
+          </div>
+          <div class="empty-state" id="emptyPlans" hidden><span class="empty-icon"><svg><use href="#i-drive"/></svg></span><h3 data-i18n="noPlans">还没有备份方案</h3><p data-i18n="noPlansHint">创建第一个方案，选择数据源、远端目标和重试策略。</p><button class="button primary" data-action="new"><svg><use href="#i-plus"/></svg><span data-i18n="createPlan">创建方案</span></button></div>
+        </section>
+
+        <section class="section-block" id="accounts">
+          <div class="section-heading"><div><p class="eyebrow">RCLONE CONFIG</p><h2 data-i18n="storageAccounts">存储账号</h2></div><button class="button ghost" id="addAccountButton"><svg><use href="#i-plus"/></svg><span data-i18n="addAccount">添加账号</span></button></div>
+          <p class="section-copy" data-i18n="accountBoundary">账号和密钥只保存在 rclone 配置文件中；备份数据库仅引用别名。</p>
+          <div class="account-grid" id="accountGrid"></div>
+          <div class="empty-state" id="emptyAccounts" hidden><span class="empty-icon"><svg><use href="#i-globe"/></svg></span><h3 data-i18n="noAccounts">还没有存储账号</h3><p data-i18n="noAccountsHint">添加一个 rclone 远端，连接 S3、WebDAV、SFTP 或其他提供商。</p><button class="button primary" data-action="configure-storage" data-i18n="configureStorage">配置存储</button></div>
+        </section>
+
+        <section class="section-block" id="history">
+          <div class="section-heading"><div><p class="eyebrow" data-i18n="activity">活动</p><h2 data-i18n="recentHistory">最近运行</h2></div><button class="button ghost" id="refreshButton" data-i18n="refresh">刷新</button></div>
+          <div class="history-card"><div class="history-table" id="historyList"><div class="skeleton row"></div></div></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+  <dialog class="plan-dialog" id="planDialog" aria-labelledby="dialogTitle">
+    <form id="planForm" method="dialog">
+      <header class="dialog-header"><div><p class="eyebrow" data-i18n="configuration">配置</p><h2 id="dialogTitle" data-i18n="newPlan">新建方案</h2></div><button class="icon-button" type="button" data-action="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
+      <div class="dialog-body">
+        <div class="form-error" id="formError" role="alert" hidden></div>
+        <section class="form-section"><div class="form-section-title"><span>01</span><div><h3 data-i18n="basics">基础设置</h3><p data-i18n="basicsHint">名称、运行状态与定时规则</p></div></div>
+          <div class="form-grid">
+            <label class="field span-2"><span data-i18n="planName">方案名称</span><input name="name" maxlength="80" required autocomplete="off" placeholder="Home server"></label>
+            <label class="field"><span data-i18n="schedule">Cron 表达式</span><input name="schedule" required value="5 * * * *" inputmode="text"><small data-i18n="scheduleHint">例如：每天凌晨 2 点 = 0 2 * * *</small></label>
+            <label class="field"><span data-i18n="timezone">时区</span><input name="timezone" required value="UTC" list="timezones"><datalist id="timezones"><option value="UTC"><option value="Asia/Shanghai"><option value="Asia/Hong_Kong"><option value="Europe/London"><option value="America/New_York"></datalist></label>
+            <label class="switch-field span-2"><span><strong data-i18n="enabled">启用自动备份</strong><small data-i18n="enabledHint">保存后调度器将按 Cron 规则运行</small></span><input type="checkbox" name="enabled" checked><i></i></label>
+          </div>
+        </section>
+
+        <section class="form-section"><div class="form-section-title"><span>02</span><div><h3 data-i18n="sourcesTargets">数据源与目标</h3><p data-i18n="sourcesTargetsHint">支持多个文件夹和 rclone 远端</p></div></div>
+          <div class="repeat-group"><div class="repeat-header"><strong data-i18n="folders">备份文件夹</strong><button type="button" class="text-button" data-action="add-source"><svg><use href="#i-plus"/></svg><span data-i18n="add">添加</span></button></div><div id="sourcesEditor"></div></div>
+          <div class="repeat-group"><div class="repeat-header"><strong data-i18n="remoteTargets">远端目标</strong><button type="button" class="text-button" data-action="add-remote"><svg><use href="#i-plus"/></svg><span data-i18n="add">添加</span></button></div><div id="remotesEditor"></div></div>
+          <label class="field"><span data-i18n="rcloneFlags">Rclone 全局参数</span><input name="rclone_flags" placeholder="--transfers 4 --checkers 8"><small data-i18n="flagsHint">使用 shell 风格引号解析，但不会通过 shell 执行</small></label>
+        </section>
+
+        <details class="form-section disclosure" open><summary><div class="form-section-title"><span>03</span><div><h3 data-i18n="archiveRetention">归档、加密与保留</h3><p data-i18n="archiveRetentionHint">生成可直接下载和解压恢复的标准归档</p></div></div><svg><use href="#i-chevron"/></svg></summary>
+          <div class="form-grid details-content">
+            <label class="field"><span data-i18n="archiveType">归档格式</span><select name="archive_kind"><option value="7z" data-i18n="secureArchive">7z · 安全优先（推荐）</option><option value="zip" data-i18n="compatibleArchive">ZIP · 兼容优先</option><option value="none" data-i18n="nativeDirectory">原生目录 · 依赖 rclone 恢复</option></select></label>
+            <label class="field"><span data-i18n="archivePassword">归档密码（可选）</span><input name="archive_password" type="password" autocomplete="new-password"><small id="archiveSecurityHint" data-i18n="secureArchiveHint">设置后使用 AES-256 并加密文件名，常见 7z 软件可直接恢复。</small></label>
+            <label class="field"><span data-i18n="fileSuffix">文件名时间格式</span><input name="archive_suffix" value="%Y%m%d-%H%M%S" required></label>
+            <label class="field"><span data-i18n="keepDays">保留天数</span><input name="keep_days" type="number" min="0" max="36500" value="0"></label>
+            <label class="field"><span data-i18n="keepCount">保留份数</span><input name="keep_count" type="number" min="0" max="100000" value="0"></label>
+          </div>
+        </details>
+
+        <details class="form-section disclosure" open><summary><div class="form-section-title"><span>04</span><div><h3 data-i18n="retryPolicy">重试策略</h3><p data-i18n="retryHint">在网络或远端临时故障时自动恢复</p></div></div><svg><use href="#i-chevron"/></svg></summary>
+          <div class="form-grid details-content">
+            <label class="field"><span data-i18n="maxAttempts">最大尝试次数</span><input name="max_attempts" type="number" min="1" max="20" value="3" required></label>
+            <label class="field"><span data-i18n="backoff">退避方式</span><select name="backoff"><option value="exponential" data-i18n="exponential">指数退避</option><option value="fixed" data-i18n="fixed">固定间隔</option></select></label>
+            <label class="field"><span data-i18n="initialDelay">初始等待（秒）</span><input name="initial_delay" type="number" min="0" max="86400" value="10"></label>
+            <label class="field"><span data-i18n="maxDelay">最长等待（秒）</span><input name="max_delay" type="number" min="0" max="86400" value="300"></label>
+          </div>
+        </details>
+
+        <details class="form-section disclosure"><summary><div class="form-section-title"><span>05</span><div><h3 data-i18n="notifications">通知</h3><p data-i18n="notificationsHint">Ping、SMTP 与 ServerChan</p></div></div><svg><use href="#i-chevron"/></svg></summary>
+          <div class="form-grid details-content">
+            <label class="field span-2"><span>Ping URL · Success</span><input name="ping_success" type="url" placeholder="https://hc-ping.com/..."></label>
+            <label class="field span-2"><span>Ping URL · Failure</span><input name="ping_failure" type="url" placeholder="https://hc-ping.com/.../fail"></label>
+            <label class="switch-field span-2"><span><strong>SMTP</strong><small data-i18n="smtpHint">在成功或失败时发送邮件</small></span><input type="checkbox" name="mail_enabled"><i></i></label>
+            <label class="field"><span data-i18n="recipient">收件人</span><input name="mail_to" type="email"></label>
+            <label class="field"><span data-i18n="smtpOptions">s-nail 参数</span><input name="mail_options" placeholder="-S smtp=..."></label>
+            <label class="switch-field span-2"><span><strong>ServerChan</strong><small data-i18n="serverChanHint">通过 SendKey 推送运行状态</small></span><input type="checkbox" name="server_enabled"><i></i></label>
+            <label class="field span-2"><span>SendKey</span><input name="server_key" type="password" autocomplete="new-password"></label>
+          </div>
+        </details>
+      </div>
+      <footer class="dialog-footer"><button type="button" class="button ghost" data-action="close" data-i18n="cancel">取消</button><button class="button primary" type="submit" id="saveButton"><span data-i18n="savePlan">保存方案</span></button></footer>
+    </form>
+  </dialog>
+
+  <dialog class="log-dialog" id="logDialog"><header class="dialog-header"><h2 data-i18n="runLog">运行日志</h2><button class="icon-button" type="button" data-action="close-log" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header><pre id="logContent" tabindex="0"></pre></dialog>
+
+  <dialog class="remote-dialog" id="remoteDialog" aria-labelledby="remoteDialogTitle">
+    <form id="remoteForm">
+      <header class="dialog-header"><div><p class="eyebrow">RCLONE REMOTE</p><h2 id="remoteDialogTitle" data-i18n="configureStorage">配置存储</h2></div><button class="icon-button" type="button" data-action="close-remote" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
+      <div class="dialog-body">
+        <div class="wizard-steps" aria-label="Steps"><span class="active">1</span><i></i><span>2</span><i></i><span>3</span></div>
+        <p class="wizard-intro" data-i18n="storageIntro">选择存储提供商，输入 rclone 别名和该服务要求的凭据。敏感字段直接交给 rclone 加密保存。</p>
+        <div class="form-error" id="remoteError" role="alert" hidden></div>
+        <div class="form-grid">
+          <label class="field"><span data-i18n="rcloneAlias">Rclone 别名</span><input name="remote_name" required maxlength="80" placeholder="MyStorage" autocomplete="off"></label>
+          <label class="field"><span data-i18n="provider">存储提供商</span><select name="provider" id="providerSelect" required><option value="" data-i18n="loadingProviders">正在加载提供商…</option></select></label>
+        </div>
+        <div class="provider-description" id="providerDescription"></div>
+        <div class="provider-fields form-grid" id="providerFields"></div>
+        <div class="provider-fields form-grid" id="remoteFlowFields"></div>
+        <details class="advanced-provider" id="advancedProvider"><summary data-i18n="advancedOptions">高级选项</summary><div class="provider-fields form-grid" id="advancedProviderFields"></div></details>
+        <div class="remote-result" id="remoteResult" hidden></div>
+      </div>
+      <footer class="dialog-footer"><button type="button" class="button ghost" data-action="close-remote" data-i18n="cancel">取消</button><button class="button primary" type="submit" id="remoteSaveButton" data-i18n="saveAndTest">保存并测试</button></footer>
+    </form>
+  </dialog>
+
+  <template id="sourceTemplate"><div class="repeat-row source-row"><label class="field"><span data-i18n="label">名称</span><input data-field="name" required maxlength="80" placeholder="data"></label><label class="field grow"><span data-i18n="path">绝对路径</span><input data-field="path" required placeholder="/data"></label><button type="button" class="icon-button danger" data-action="remove-row" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
+  <template id="remoteTemplate"><div class="repeat-row remote-row"><label class="field"><span data-i18n="remoteName">Rclone 远端名</span><select data-field="name" required><option value="">—</option></select></label><label class="field grow"><span data-i18n="remoteDir">远端目录</span><input data-field="directory" required placeholder="/RcloneBackup/"></label><button type="button" class="icon-button danger" data-action="remove-row" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
+  <script src="/app.js" defer></script>
+</body>
+</html>

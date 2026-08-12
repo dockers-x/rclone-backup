@@ -1,115 +1,61 @@
-name: Docker Publish
+name: Container images
 
 on:
   push:
-    branches:
-      - master
-    tags:
-      - "*.*.*"
+    branches: [main]
+    tags: ["v*.*.*"]
 
 permissions:
+  contents: read
   packages: write
 
 jobs:
-  publish-tag:
-    name: Docker Publish Tag
+  test:
     runs-on: ubuntu-latest
-    if: ${{ github.ref != 'refs/heads/master' && !contains(github.ref, '-') }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Prepare
-        run: echo "TAG=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Login to DockerHub
-        uses: docker/login-action@v4
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Login to ghcr.io
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v6,linux/arm/v7
-          push: true
-          tags: |
-            czyt/rclone-backup:${{ env.TAG }}
-            ghcr.io/dockers-x/rclone-backup:${{ env.TAG }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-targets --all-features
+      - uses: rustsec/audit-check@v2
 
-  publish-beta:
-    name: Docker Publish Beta
+  publish:
+    needs: test
     runs-on: ubuntu-latest
-    if: ${{ github.ref != 'refs/heads/master' && contains(github.ref, '-') }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Prepare
-        run: echo "TAG=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Login to DockerHub
-        uses: docker/login-action@v4
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Login to ghcr.io
-        uses: docker/login-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
-        uses: docker/build-push-action@v7
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            czyt/rclone-backup
+            ghcr.io/dockers-x/rclone-backup
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+      - uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v6,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            czyt/rclone-backup:${{ env.TAG }}
-            ghcr.io/dockers-x/rclone-backup:${{ env.TAG }}
-
-  publish-latest:
-    name: Docker Publish Latest
-    runs-on: ubuntu-latest
-    if: ${{ github.ref == 'refs/heads/master' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Login to DockerHub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Login to ghcr.io
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v6,linux/arm/v7
-          push: true
-          tags: |
-            czyt/rclone-backup:latest
-            ghcr.io/dockers-x/rclone-backup:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,18 +1,24 @@
-FROM rclone/rclone:1.74.4
+FROM rust:1.97-alpine AS builder
 
-ARG USER_NAME="backuptool"
-ARG USER_ID="1100"
+WORKDIR /src
+RUN apk add --no-cache musl-dev
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY web ./web
+RUN cargo build --locked --release
 
-ENV LOCALTIME_FILE="/tmp/localtime"
+FROM rclone/rclone:1.75.0
 
-COPY scripts/*.sh /app/
+ENV RCLONE_CONFIG=/config/rclone/rclone.conf \
+    RCLONE_BACKUP_ADDR=0.0.0.0:8080 \
+    RCLONE_BACKUP_DATABASE_URL=sqlite:///config/rclone-backup.db?mode=rwc \
+    RCLONE_BACKUP_WORK_DIR=/tmp/rclone-backup
 
-RUN chmod +x /app/*.sh \
-  && mkdir -m 777 /data/backup \
-  && apk add --no-cache 7zip bash mariadb-client postgresql16-client sqlite supercronic s-nail tzdata curl \
-  && apk info --no-cache -Lq mariadb-client | grep -vE '/bin/mariadb$' | grep -vE '/bin/mariadb-dump$' | xargs -I {} rm -f "/{}" \
-  && ln -sf "${LOCALTIME_FILE}" /etc/localtime \
-  && addgroup -g "${USER_ID}" "${USER_NAME}" \
-  && adduser -u "${USER_ID}" -Ds /bin/sh -G "${USER_NAME}" "${USER_NAME}"
+RUN apk add --no-cache 7zip ca-certificates curl s-nail tzdata \
+    && mkdir -p /config/rclone /tmp/rclone-backup
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+COPY --from=builder /src/target/release/rclone-backup /usr/local/bin/rclone-backup
+
+EXPOSE 8080
+VOLUME ["/config"]
+ENTRYPOINT ["/usr/local/bin/rclone-backup"]

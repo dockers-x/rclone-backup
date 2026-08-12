@@ -1,92 +1,15 @@
-# Run as non-root user
+# Run as a non-root user
 
-By default, the container runs the backup script as the root user. If you wish to run the container as a non-root user, there are a few things you need to set.
+The image may be run with a numeric user when the mounted directories are writable by that user:
 
-You can use the built-in non-root user and group, named `backuptool`, with the UID and GID of `1100`.
-
-<br>
-
-
-
-## Backup
-
-1. Make sure that the rclone config file in the mounted `rclone-backup-data` volume is writable by `backuptool` user.
-
-```shell
-# enter the container
-docker run --rm -it \
-  --mount type=volume,source=rclone-backup-data,target=/config/ \
-  --entrypoint=bash \
-  adrienpoupa/rclone-backup:latest
-
-# modify the rclone config file owner in the container
-chown -R 1100:1100 /config/
-
-# exit the container
-exit
-```
-
-2. If you want a full backup of the `rsa_key*`, you need to allow the `backuptool` user to read the `rsa_key*`.
-
-**With Docker Compose**
-
-```shell
-# enter the container
-docker run --rm -it \
-  --mount type=volume,source=rclone-backup-data,target=/data/ \
-  --entrypoint=bash \
-  adrienpoupa/rclone-backup:latest
-
-# make files readable for all users in the container
-chmod -R +r /data/
-
-# exit the container
-exit
-```
-
-**With Automatic Backups**
-
-```shell
-# enter the container
-docker run --rm -it \
-  --volumes-from=your-container \
-  --entrypoint=bash \
-  adrienpoupa/rclone-backup:latest
-
-# make files readable for all users in the container
-chmod -R +r /data/
-
-# exit the container
-exit
-```
-
-3. Start the container with proper parameters.
-
-**With Docker Compose**
-
-```shell
-# docker-compose.yml
-services:
-  backup:
-    image: adrienpoupa/rclone-backup:latest
-    user: 'backuptool:backuptool'
-    ...
-```
-
-**With Automatic Backups**
-
-```shell
+```bash
 docker run -d \
-  ...
-  --user backuptool:backuptool \
-  ...
-  adrienpoupa/rclone-backup:latest
+  --name rclone-backup \
+  --user 1100:1100 \
+  -p 127.0.0.1:8080:8080 \
+  -v /srv/rclone-backup/config:/config \
+  -v /srv/data:/data:ro \
+  czyt/rclone-backup:2.0.0
 ```
 
-<br>
-
-
-
-## Restore
-
-Perform the restore normally, nothing special.
+Before starting, create `/srv/rclone-backup/config/rclone` and make `/srv/rclone-backup/config` writable by `1100:1100`. The service needs to create SQLite, its encryption key, the rclone config, and temporary work files. Source directories only need read and traversal permission.

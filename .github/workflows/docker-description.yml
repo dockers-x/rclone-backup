@@ -3,7 +3,7 @@ name: 'Docker Publish Description'
 on:
   push:
     branches:
-      - master
+      - main
     paths:
       - README.md
       - .github/workflows/docker-description.yml
@@ -21,5 +21,5 @@ jobs:
         uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-          repository: 'adrienpoupa/rclone-backup'
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: 'czyt/rclone-backup'

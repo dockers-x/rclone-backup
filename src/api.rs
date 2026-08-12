@@ -1,0 +1,645 @@
+use crate::{
+    model::{Plan, PlanInput, REDACTED, RunRecord},
+    runner::Runner,
+    store::Store,
+};
+use axum::{
+    Json, Router,
+    body::Body,
+    extract::{Path, Query, Request, State},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post, put},
+};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use subtle::ConstantTimeEq;
+use tower_http::{
+    catch_panic::CatchPanicLayer, compression::CompressionLayer, limit::RequestBodyLimitLayer,
+    set_header::SetResponseHeaderLayer,
+};
+use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub store: Store,
+    pub runner: Runner,
+    pub public_auth: Option<(String, String)>,
+}
+
+pub fn router(state: AppState) -> Router {
+    let protected = Router::new()
+        .route("/", get(index))
+        .route("/app.css", get(css))
+        .route("/app.js", get(js))
+        .route("/api/docs", get(api_docs))
+        .route("/api/openapi.json", get(openapi))
+        .route("/api/status", get(status))
+        .route("/api/rclone/providers", get(rclone_providers))
+        .route(
+            "/api/rclone/remotes",
+            get(rclone_remotes).post(create_rclone_remote),
+        )
+        .route(
+            "/api/rclone/remotes/{name}",
+            axum::routing::put(update_rclone_remote).delete(delete_rclone_remote),
+        )
+        .route(
+            "/api/rclone/remotes/{name}/test",
+            axum::routing::post(test_rclone_remote),
+        )
+        .route("/api/plans", get(list_plans).post(create_plan))
+        .route("/api/plans/{id}", put(update_plan).delete(delete_plan))
+        .route("/api/plans/{id}/run", post(run_plan))
+        .route("/api/runs", get(list_runs))
+        .fallback(not_found)
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
+    Router::new()
+        .route("/api/health", get(health))
+        .merge(protected)
+        .with_state(state)
+        .layer(RequestBodyLimitLayer::new(1024 * 1024))
+        .layer(CompressionLayer::new())
+        .layer(CatchPanicLayer::new())
+        .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::if_not_present(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
+        .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"),
+        ))
+}
+
+async fn index() -> impl IntoResponse {
+    static_asset(
+        include_str!("../web/index.html"),
+        "text/html; charset=utf-8",
+    )
+}
+async fn css() -> impl IntoResponse {
+    static_asset(include_str!("../web/app.css"), "text/css; charset=utf-8")
+}
+async fn js() -> impl IntoResponse {
+    static_asset(
+        include_str!("../web/app.js"),
+        "text/javascript; charset=utf-8",
+    )
+}
+fn static_asset(content: &'static str, content_type: &'static str) -> Response {
+    Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, "public, max-age=3600")
+        .body(Body::from(content))
+        .unwrap()
+}
+
+#[derive(Serialize)]
+struct Health {
+    status: &'static str,
+    version: &'static str,
+    time: chrono::DateTime<Utc>,
+}
+async fn health() -> Json<Health> {
+    Json(Health {
+        status: "ok",
+        version: env!("CARGO_PKG_VERSION"),
+        time: Utc::now(),
+    })
+}
+
+#[derive(Serialize)]
+struct Status {
+    service: &'static str,
+    rclone_ready: bool,
+    authentication_enabled: bool,
+    rclone_stats: serde_json::Value,
+}
+async fn status(State(state): State<AppState>) -> Json<Status> {
+    Json(Status {
+        service: "online",
+        rclone_ready: state.runner.rclone_ready(),
+        authentication_enabled: state.public_auth.is_some(),
+        rclone_stats: state.runner.rclone_stats().await,
+    })
+}
+
+async fn rclone_providers(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(state.runner.rclone_providers().await?))
+}
+
+async fn rclone_remotes(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(state.runner.rclone_remotes().await?))
+}
+
+#[derive(Deserialize)]
+struct RemoteInput {
+    name: String,
+    #[serde(rename = "type")]
+    provider_type: String,
+    #[serde(default)]
+    parameters: serde_json::Value,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    result: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct RemoteUpdateInput {
+    #[serde(default)]
+    parameters: serde_json::Value,
+}
+
+impl RemoteInput {
+    fn validate(&self) -> Result<(), String> {
+        if self.name.is_empty()
+            || self.name.chars().count() > 80
+            || self
+                .name
+                .chars()
+                .any(|c| c.is_control() || matches!(c, ':' | '/' | '\\'))
+        {
+            return Err("rclone alias is invalid".into());
+        }
+        if self.provider_type.is_empty()
+            || self.provider_type.chars().count() > 80
+            || !self
+                .provider_type
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+        {
+            return Err("provider type is invalid".into());
+        }
+        if !self.parameters.is_object() {
+            return Err("parameters must be an object".into());
+        }
+        Ok(())
+    }
+}
+
+async fn create_rclone_remote(
+    State(state): State<AppState>,
+    Json(input): Json<RemoteInput>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    input.validate().map_err(ApiError::validation)?;
+    let response = if let Some(flow_state) = &input.state {
+        state
+            .runner
+            .continue_rclone_remote(
+                &input.name,
+                &input.provider_type,
+                input.parameters,
+                flow_state,
+                input.result.unwrap_or_else(|| json!({})),
+            )
+            .await?
+    } else {
+        state
+            .runner
+            .create_rclone_remote(&input.name, &input.provider_type, input.parameters)
+            .await?
+    };
+    let needs_more_input = remote_needs_input(&response);
+    if !needs_more_input {
+        state.runner.test_rclone_remote(&input.name).await?;
+    }
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+fn remote_needs_input(response: &serde_json::Value) -> bool {
+    response
+        .get("State")
+        .or_else(|| response.get("state"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|state| !state.is_empty())
+        || response
+            .get("Option")
+            .or_else(|| response.get("option"))
+            .is_some_and(|option| !option.is_null())
+}
+
+async fn delete_rclone_remote(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    validate_remote_name(&name)?;
+    let references: Vec<String> = state
+        .store
+        .list_plans()
+        .await?
+        .into_iter()
+        .filter(|plan| plan.remotes.iter().any(|remote| remote.name == name))
+        .map(|plan| plan.name)
+        .collect();
+    if !references.is_empty() {
+        return Err(ApiError::conflict(format!(
+            "remote is referenced by backup plan(s): {}",
+            references.join(", ")
+        )));
+    }
+    state.runner.delete_rclone_remote(&name).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn update_rclone_remote(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(input): Json<RemoteUpdateInput>,
+) -> ApiResult<Json<serde_json::Value>> {
+    validate_remote_name(&name)?;
+    if !input.parameters.is_object() {
+        return Err(ApiError::validation("parameters must be an object".into()));
+    }
+    let response = state
+        .runner
+        .update_rclone_remote(&name, input.parameters)
+        .await?;
+    state.runner.test_rclone_remote(&name).await?;
+    Ok(Json(response))
+}
+
+async fn ensure_plan_aliases(state: &AppState, input: &PlanInput) -> ApiResult<()> {
+    let summaries = state.runner.rclone_remotes().await?;
+    let aliases: std::collections::HashSet<&str> = summaries
+        .get("remotes")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|remote| remote.get("name").and_then(serde_json::Value::as_str))
+        .collect();
+    let missing: Vec<&str> = input
+        .remotes
+        .iter()
+        .map(|remote| remote.name.as_str())
+        .filter(|name| !aliases.contains(name))
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(ApiError::validation(format!(
+            "unknown rclone alias(es): {}",
+            missing.join(", ")
+        )))
+    }
+}
+
+async fn test_rclone_remote(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    validate_remote_name(&name)?;
+    state.runner.test_rclone_remote(&name).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+fn validate_remote_name(name: &str) -> ApiResult<()> {
+    let input = RemoteInput {
+        name: name.to_owned(),
+        provider_type: "placeholder".into(),
+        parameters: json!({}),
+        state: None,
+        result: None,
+    };
+    input.validate().map_err(ApiError::validation)
+}
+
+async fn require_auth(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: Request,
+    next: Next,
+) -> Result<Response, Response> {
+    if matches!(
+        *request.method(),
+        axum::http::Method::POST | axum::http::Method::PUT | axum::http::Method::DELETE
+    ) && !same_origin_or_non_browser(&headers)
+    {
+        return Err(Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::from("cross-origin request rejected"))
+            .unwrap());
+    }
+    let Some((expected_user, expected_password)) = &state.public_auth else {
+        return Ok(next.run(request).await);
+    };
+    let valid = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Basic "))
+        .and_then(|value| STANDARD.decode(value).ok())
+        .and_then(|value| String::from_utf8(value).ok())
+        .and_then(|value| {
+            value
+                .split_once(':')
+                .map(|(u, p)| (u.to_owned(), p.to_owned()))
+        })
+        .is_some_and(|(user, password)| {
+            user.as_bytes().ct_eq(expected_user.as_bytes()).into()
+                && password
+                    .as_bytes()
+                    .ct_eq(expected_password.as_bytes())
+                    .into()
+        });
+    if valid {
+        Ok(next.run(request).await)
+    } else {
+        Err(Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header(
+                header::WWW_AUTHENTICATE,
+                "Basic realm=\"Rclone Backup\", charset=\"UTF-8\"",
+            )
+            .body(Body::from("authentication required"))
+            .unwrap())
+    }
+}
+
+fn same_origin_or_non_browser(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return true;
+    };
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    origin
+        .to_str()
+        .ok()
+        .and_then(|value| url::Url::parse(value).ok())
+        .is_some_and(|value| {
+            let Some(host_name) = value.host_str() else {
+                return false;
+            };
+            let origin_authority = match value.port() {
+                Some(port) => format!("{host_name}:{port}"),
+                None => host_name.to_owned(),
+            };
+            origin_authority.eq_ignore_ascii_case(host)
+        })
+}
+
+async fn openapi() -> impl IntoResponse {
+    Json(json!({
+        "openapi": "3.1.0",
+        "info": { "title": "Rclone Backup API", "version": env!("CARGO_PKG_VERSION") },
+        "servers": [{ "url": "/" }],
+        "paths": {
+            "/api/health": { "get": { "summary": "Liveness", "responses": { "200": { "description": "Service is alive" }}}},
+            "/api/status": { "get": { "summary": "Service, rclone readiness, and transfer status", "responses": { "200": { "description": "Current status" }}}},
+            "/api/rclone/providers": { "get": { "summary": "List provider schemas from the bundled rclone", "responses": { "200": { "description": "Provider schemas" }}}},
+            "/api/rclone/remotes": {
+                "get": { "summary": "List configured rclone aliases", "responses": { "200": { "description": "Aliases" }}},
+                "post": { "summary": "Create or continue a guided rclone remote configuration", "responses": { "201": { "description": "Created or next configuration question" }, "422": { "description": "Validation error" }}}
+            },
+            "/api/rclone/remotes/{name}": {
+                "put": { "summary": "Update and test an rclone alias", "responses": { "200": { "description": "Updated and connected" }}},
+                "delete": { "summary": "Delete an unreferenced rclone alias", "responses": { "204": { "description": "Deleted" }, "409": { "description": "Alias is referenced by a plan" }}}
+            },
+            "/api/rclone/remotes/{name}/test": { "post": { "summary": "Test an rclone alias", "responses": { "200": { "description": "Connection passed" }}}},
+            "/api/plans": {
+                "get": { "summary": "List backup plans", "responses": { "200": { "description": "Plans" }}},
+                "post": { "summary": "Create a backup plan", "responses": { "201": { "description": "Created" }, "422": { "description": "Validation error" }}}
+            },
+            "/api/plans/{id}": {
+                "put": { "summary": "Update a backup plan", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" }}], "responses": { "200": { "description": "Updated" }}},
+                "delete": { "summary": "Delete a backup plan", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" }}], "responses": { "204": { "description": "Deleted" }}}
+            },
+            "/api/plans/{id}/run": { "post": { "summary": "Run a plan now", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" }}], "responses": { "202": { "description": "Accepted" }, "409": { "description": "Rclone not ready or plan already running" }}}},
+            "/api/runs": { "get": { "summary": "List persistent run history", "responses": { "200": { "description": "Runs" }}}}
+        }
+    }))
+}
+
+async fn api_docs() -> impl IntoResponse {
+    static_asset(
+        include_str!("../web/api-docs.html"),
+        "text/html; charset=utf-8",
+    )
+}
+
+async fn list_plans(State(state): State<AppState>) -> ApiResult<Json<Vec<Plan>>> {
+    let mut plans = state.store.list_plans().await?;
+    for plan in &mut plans {
+        redact_plan(plan);
+    }
+    Ok(Json(plans))
+}
+
+async fn create_plan(
+    State(state): State<AppState>,
+    Json(input): Json<PlanInput>,
+) -> ApiResult<(StatusCode, Json<Plan>)> {
+    input.validate().map_err(ApiError::validation)?;
+    ensure_plan_aliases(&state, &input).await?;
+    let now = Utc::now();
+    let plan = input.into_plan(Uuid::new_v4(), now);
+    state.store.save_plan(&plan).await?;
+    let mut public = plan;
+    redact_plan(&mut public);
+    Ok((StatusCode::CREATED, Json(public)))
+}
+
+async fn update_plan(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(mut input): Json<PlanInput>,
+) -> ApiResult<Json<Plan>> {
+    input.validate().map_err(ApiError::validation)?;
+    ensure_plan_aliases(&state, &input).await?;
+    let existing = state
+        .store
+        .get_plan(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    merge_redacted_secrets(&mut input, &existing);
+    let mut plan = input.into_plan(id, existing.created_at);
+    plan.updated_at = Utc::now();
+    state.store.save_plan(&plan).await?;
+    redact_plan(&mut plan);
+    Ok(Json(plan))
+}
+
+async fn delete_plan(State(state): State<AppState>, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    if state.runner.is_active(id).await {
+        return Err(ApiError::conflict("plan is running"));
+    }
+    if state.store.delete_plan(id).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::not_found())
+    }
+}
+
+async fn run_plan(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let plan = state
+        .store
+        .get_plan(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    let run_id = state
+        .runner
+        .start(plan, "manual")
+        .await
+        .map_err(|e| ApiError::conflict(e.to_string()))?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "run_id": run_id }))))
+}
+
+#[derive(Deserialize)]
+struct RunQuery {
+    plan_id: Option<Uuid>,
+    limit: Option<u32>,
+}
+async fn list_runs(
+    State(state): State<AppState>,
+    Query(query): Query<RunQuery>,
+) -> ApiResult<Json<Vec<RunRecord>>> {
+    Ok(Json(
+        state
+            .store
+            .list_runs(query.plan_id, query.limit.unwrap_or(50))
+            .await?,
+    ))
+}
+
+fn redact_plan(plan: &mut Plan) {
+    if !plan.archive.password.is_empty() {
+        plan.archive.password = REDACTED.into();
+    }
+    if !plan.notifications.serverchan.send_key.is_empty() {
+        plan.notifications.serverchan.send_key = REDACTED.into();
+    }
+    for value in &mut plan.notifications.mail.smtp_options {
+        if value.contains("password")
+            && let Some((prefix, _)) = value.split_once('=')
+        {
+            *value = format!("{prefix}={REDACTED}");
+        }
+    }
+}
+
+fn merge_redacted_secrets(input: &mut PlanInput, existing: &Plan) {
+    if input.archive.password == REDACTED {
+        input
+            .archive
+            .password
+            .clone_from(&existing.archive.password);
+    }
+    if input.notifications.serverchan.send_key == REDACTED {
+        input
+            .notifications
+            .serverchan
+            .send_key
+            .clone_from(&existing.notifications.serverchan.send_key);
+    }
+    for (value, old) in input
+        .notifications
+        .mail
+        .smtp_options
+        .iter_mut()
+        .zip(&existing.notifications.mail.smtp_options)
+    {
+        if value.ends_with(REDACTED) {
+            value.clone_from(old);
+        }
+    }
+}
+
+async fn not_found() -> ApiError {
+    ApiError::not_found()
+}
+
+type ApiResult<T> = Result<T, ApiError>;
+pub struct ApiError {
+    status: StatusCode,
+    message: String,
+}
+impl ApiError {
+    fn validation(message: String) -> Self {
+        Self {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            message,
+        }
+    }
+    fn not_found() -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: "not found".into(),
+        }
+    }
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.into(),
+        }
+    }
+}
+impl<E> From<E> for ApiError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(error: E) -> Self {
+        tracing::error!(error = %error.into(), "internal API error");
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "internal server error".into(),
+        }
+    }
+}
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.status, Json(json!({ "error": self.message }))).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{remote_needs_input, same_origin_or_non_browser};
+    use axum::http::{HeaderMap, HeaderValue, header};
+    use serde_json::json;
+
+    #[test]
+    fn completed_rclone_response_is_not_interactive() {
+        assert!(!remote_needs_input(&json!({
+            "State": "",
+            "Option": null,
+            "Result": "",
+            "Error": ""
+        })));
+    }
+
+    #[test]
+    fn rclone_question_requires_continuation() {
+        assert!(remote_needs_input(&json!({
+            "State": "choose",
+            "Option": { "Name": "answer" }
+        })));
+    }
+
+    #[test]
+    fn browser_mutations_must_be_same_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::HOST,
+            HeaderValue::from_static("backup.example:8080"),
+        );
+        assert!(same_origin_or_non_browser(&headers));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://backup.example:8080"),
+        );
+        assert!(same_origin_or_non_browser(&headers));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://attacker.example"),
+        );
+        assert!(!same_origin_or_non_browser(&headers));
+    }
+}

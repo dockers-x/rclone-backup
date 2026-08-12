@@ -1,36 +1,11 @@
 # Manually trigger a backup
 
-Sometimes, it's necessary to manually trigger backup actions.
+Use **Run now** in the Web UI for the normal path. The service returns a run ID immediately and records progress in Run history.
 
-This can be useful when other programs are used to consistently schedule tasks or to verify that environment variables are properly configured.
+The compatible command-line path remains available:
 
-<br>
-
-
-
-## Usage
-
-Previously, performing an immediate backup required overwriting the entrypoint of the image. However, with the new setup, you can perform a backup directly with a parameterless command.
-
-```shell
-docker run \
-  --rm \
-  --name rclone_backup \
-  --volumes-from=your-container \
-  --mount type=volume,source=rclone-backup-data,target=/config/ \
-  -e ... \
-  adrienpoupa/rclone-backup:latest backup
+```bash
+docker exec rclone-backup rclone-backup backup PLAN_ID
 ```
 
-You also need to mount the rclone config file and set the environment variables.
-
-The only difference is that the environment variable `CRON` does not work because it does not start the CRON program, but exits the container after the backup is done.
-
-<br>
-
-
-
-## IMPORTANT
-
-**Manually triggering a backup only verifies that the environment variables are configured correctly, not that CRON is working properly. This is the [issue](https://github.com/AdrienPoupa/rclone-backup/issues/53) that CRON may not work properly on ARM devices.**
-
+When there is exactly one plan, `PLAN_ID` can be omitted. The command waits for completion and exits. If rclone has no configured remote, it returns `RCLONE_NOT_READY`; the normal service process remains online.

@@ -1,0 +1,10 @@
+.git
+.github
+.firecrawl
+target
+*.db
+*.db-shm
+*.db-wal
+.env
+design-system
+docs
