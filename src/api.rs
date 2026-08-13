@@ -86,13 +86,17 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn index(State(state): State<AppState>) -> impl IntoResponse {
-    let html =
-        include_str!("../web/index.html").replace("{{SITE_NAME}}", &escape_html(&state.site_name));
+    let html = render_index_html(&state.site_name);
     Response::builder()
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-cache")
         .body(Body::from(html))
         .unwrap()
+}
+fn render_index_html(site_name: &str) -> String {
+    include_str!("../web/index.html")
+        .replace("{{SITE_NAME}}", &escape_html(site_name))
+        .replace("{{ASSET_VERSION}}", env!("CARGO_PKG_VERSION"))
 }
 async fn css() -> impl IntoResponse {
     static_asset(include_str!("../web/app.css"), "text/css; charset=utf-8")
@@ -799,6 +803,16 @@ mod tests {
             FRONTEND_ROUTES,
             ["/", "/plans", "/accounts", "/notifications", "/history"]
         );
+    }
+
+    #[test]
+    fn index_versions_frontend_assets_with_the_build_version() {
+        let html = super::render_index_html("Backup");
+        let version = env!("CARGO_PKG_VERSION");
+
+        assert!(html.contains(&format!("/app.css?v={version}")));
+        assert!(html.contains(&format!("/app.js?v={version}")));
+        assert!(!html.contains("{{ASSET_VERSION}}"));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use tokio::{
     fs,
     io::AsyncWriteExt,
     process::Command,
-    sync::Mutex,
+    sync::{Mutex, Semaphore},
     time::{Duration, sleep},
 };
 use tracing::warn;
@@ -492,30 +492,45 @@ impl Runner {
         attempt: u32,
         log: &mut LogBuffer,
     ) -> anyhow::Result<()> {
-        let mut available = 0;
+        let concurrency = plan
+            .remote_check_concurrency
+            .clamp(1, MAX_REMOTE_CHECK_CONCURRENCY);
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+        let mut checks = Vec::with_capacity(plan.remotes.len());
+
         for remote in &plan.remotes {
             let destination = remote_path(remote);
             log.target(remote, "checking", "");
             log.line(format!("rclone lsd {destination}"));
-            self.checkpoint(run_id, attempt, log).await?;
-            if self
-                .rc
-                .run_command("lsd", vec![destination.clone()], plan.rclone_flags.clone())
-                .await
-                .is_ok()
-            {
-                available += 1;
-                log.target(remote, "ready", "");
-                self.checkpoint(run_id, attempt, log).await?;
-                continue;
+            let rc = self.rc.clone();
+            let flags = plan.rclone_flags.clone();
+            let permit = semaphore.clone();
+            let handle = tokio::spawn(async move {
+                let _permit = permit.acquire_owned().await.ok();
+                if rc
+                    .run_command("lsd", vec![destination.clone()], flags.clone())
+                    .await
+                    .is_ok()
+                {
+                    return (false, true);
+                }
+                let created = rc
+                    .run_command("mkdir", vec![destination], flags)
+                    .await
+                    .is_ok();
+                (true, created)
+            });
+            checks.push((remote, handle));
+        }
+        self.checkpoint(run_id, attempt, log).await?;
+
+        let mut available = 0;
+        for (remote, check) in checks {
+            let (mkdir_attempted, ready) = check.await.unwrap_or((false, false));
+            if mkdir_attempted {
+                log.line(format!("rclone mkdir {}", remote_path(remote)));
             }
-            log.line(format!("rclone mkdir {destination}"));
-            if self
-                .rc
-                .run_command("mkdir", vec![destination], plan.rclone_flags.clone())
-                .await
-                .is_ok()
-            {
+            if ready {
                 available += 1;
                 log.target(remote, "ready", "");
             } else {
@@ -1144,6 +1159,7 @@ impl LogBuffer {
             retry: RetryPolicy::default(),
             notifications: NotificationConfig::default(),
             rclone_flags: Vec::new(),
+            remote_check_concurrency: DEFAULT_REMOTE_CHECK_CONCURRENCY,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

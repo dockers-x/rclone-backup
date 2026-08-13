@@ -16,12 +16,12 @@ const translations = {
     enabledHint: "保存后调度器将按当前定时规则运行", scheduleFrequency: "运行频率", daily: "每天", weekly: "每周", monthly: "每月", everyHours: "每隔几小时", everyMinutes: "每隔几分钟", everySeconds: "每隔几秒", runAt: "运行时间", weekday: "星期", monthday: "每月日期", monthdayHint: "没有该日期的月份会跳过", interval: "间隔", hoursUnit: "小时", minutesUnit: "分钟", secondsUnit: "秒", monday: "星期一", tuesday: "星期二", wednesday: "星期三", thursday: "星期四", friday: "星期五", saturday: "星期六", sunday: "星期日", schedulePreview: "{summary}",
     sourcesTargets: "数据源与目标",
     sourcesTargetsHint: "支持多个文件夹和 rclone 远端", folders: "备份文件夹", add: "添加",
-    remoteTargets: "远端目标", rcloneFlags: "Rclone 全局参数", flagsHint: "使用 shell 风格引号解析，但不会通过 shell 执行",
-    none: "不备份", archiveRetention: "归档、加密与保留", archiveRetentionHint: "生成可直接下载和解压恢复的标准归档",
+    remoteTargets: "远端目标", remoteCheckConcurrency: "连接检查并行数", remoteCheckConcurrencyHint: "同时检查或创建远端目录的最大数量", rcloneFlags: "Rclone 全局参数", flagsHint: "使用 shell 风格引号解析，但不会通过 shell 执行",
+    none: "不备份", archiveEncryption: "归档与加密", archiveEncryptionHint: "生成可直接下载和解压恢复的标准归档", backupRetentionPolicy: "备份保留策略", backupRetentionHint: "按时间或数量自动清理旧备份，可独立启用",
     archiveType: "归档格式", archivePassword: "归档密码（可选）", fileSuffix: "文件名时间格式",
     secureArchive: "7z · 安全优先（推荐）", compatibleArchive: "ZIP · 兼容优先", nativeDirectory: "原生目录 · 依赖 rclone 恢复",
     secureArchiveHint: "设置后使用 AES-256 并加密文件名，常见 7z 软件可直接恢复。", compatibleArchiveHint: "设置后使用 ZipCrypto，兼容性广但加密较弱；敏感备份请选择 7z。", nativeDirectoryHint: "不生成归档，密码不生效；恢复时使用 rclone copy。",
-    keepDays: "保留天数", keepCount: "保留份数", retryPolicy: "重试策略",
+    keepDays: "保留天数", keepDaysHint: "删除超过指定天数的备份", keepCount: "保留份数", keepCountHint: "仅保留最新的指定份数", retryPolicy: "重试策略",
     retryHint: "在网络或远端临时故障时自动恢复", maxAttempts: "失败重试次数", retryCountHint: "不包含首次执行；填 0 表示失败后不重试", backoff: "退避方式",
     exponential: "指数退避", fixed: "固定间隔", initialDelay: "初始等待（秒）", maxDelay: "最长等待（秒）",
     notifications: "通知", notificationsHint: "Ping、SMTP 与 ServerChan", smtpHint: "在成功或失败时发送邮件",
@@ -62,12 +62,12 @@ const translations = {
     enabledHint: "The scheduler will use this schedule after saving", scheduleFrequency: "Frequency", daily: "Daily", weekly: "Weekly", monthly: "Monthly", everyHours: "Every few hours", everyMinutes: "Every few minutes", everySeconds: "Every few seconds", runAt: "Run at", weekday: "Weekday", monthday: "Day of month", monthdayHint: "Months without this date are skipped", interval: "Interval", hoursUnit: "hours", minutesUnit: "minutes", secondsUnit: "seconds", monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday", thursday: "Thursday", friday: "Friday", saturday: "Saturday", sunday: "Sunday", schedulePreview: "{summary}",
     sourcesTargets: "Sources & destinations",
     sourcesTargetsHint: "Multiple folders and rclone remotes are supported", folders: "Backup folders", add: "Add",
-    remoteTargets: "Remote destinations", rcloneFlags: "Global rclone flags", flagsHint: "Parsed with shell-style quoting but never executed through a shell",
-    none: "None", archiveRetention: "Archive, encryption & retention", archiveRetentionHint: "Create a standard archive that can be downloaded and extracted directly",
+    remoteTargets: "Remote destinations", remoteCheckConcurrency: "Concurrent destination checks", remoteCheckConcurrencyHint: "Maximum destinations checked or created at the same time", rcloneFlags: "Global rclone flags", flagsHint: "Parsed with shell-style quoting but never executed through a shell",
+    none: "None", archiveEncryption: "Archive & encryption", archiveEncryptionHint: "Create a standard archive that can be downloaded and extracted directly", backupRetentionPolicy: "Backup retention policy", backupRetentionHint: "Clean up old backups by age or count; enable either independently",
     archiveType: "Archive format", archivePassword: "Archive password (optional)", fileSuffix: "Filename time format",
     secureArchive: "7z · Security first (recommended)", compatibleArchive: "ZIP · Compatibility first", nativeDirectory: "Native directory · Restore with rclone",
     secureArchiveHint: "With a password, uses AES-256 and filename encryption. Common 7z apps can restore it directly.", compatibleArchiveHint: "With a password, uses widely compatible but weaker ZipCrypto. Choose 7z for sensitive backups.", nativeDirectoryHint: "No archive is created and this password is ignored. Restore with rclone copy.",
-    keepDays: "Keep days", keepCount: "Keep count", retryPolicy: "Retry policy",
+    keepDays: "Keep by age", keepDaysHint: "Delete backups older than the specified number of days", keepCount: "Keep by count", keepCountHint: "Keep only the specified number of newest backups", retryPolicy: "Retry policy",
     retryHint: "Recover automatically from transient network or remote failures", maxAttempts: "Retries after failure", retryCountHint: "Excludes the first attempt; use 0 to disable retries", backoff: "Backoff",
     exponential: "Exponential", fixed: "Fixed interval", initialDelay: "Initial delay (seconds)", maxDelay: "Maximum delay (seconds)",
     notifications: "Notifications", notificationsHint: "Ping, SMTP, and ServerChan", smtpHint: "Send mail on success or failure",
@@ -461,14 +461,15 @@ function openPlan(plan = null) {
     sources: [{ name: "data", path: "/data" }], remotes: [{ name: "RcloneBackup", directory: "/RcloneBackup/" }],
     archive: { kind: "7z", password: "", suffix: "%Y%m%d-%H%M%S" },
     retention: { keep_days: 0, keep_count: 0 }, retry: { max_attempts: 3, initial_delay_seconds: 10, max_delay_seconds: 300, backoff: "exponential" },
-    notifications: { ping: {}, mail: {}, serverchan: {} }, rclone_flags: [],
+    notifications: { ping: {}, mail: {}, serverchan: {} }, rclone_flags: [], remote_check_concurrency: 4,
   };
   for (const [name, value] of Object.entries({
     name: data.name, schedule: data.schedule, timezone: data.timezone, enabled: data.enabled,
     rclone_flags: joinArgs(data.rclone_flags), archive_kind: data.archive.kind, archive_password: data.archive.password,
-    archive_suffix: data.archive.suffix, keep_days: data.retention.keep_days, keep_count: data.retention.keep_count,
+    archive_suffix: data.archive.suffix, keep_days: data.retention.keep_days || 30, keep_count: data.retention.keep_count || 10,
+    keep_days_enabled: data.retention.keep_days > 0, keep_count_enabled: data.retention.keep_count > 0,
     retry_count: Math.max(0, data.retry.max_attempts - 1), initial_delay: data.retry.initial_delay_seconds, max_delay: data.retry.max_delay_seconds,
-    backoff: data.retry.backoff,
+    backoff: data.retry.backoff, remote_check_concurrency: data.remote_check_concurrency ?? 4,
   })) {
     const input = form.elements[name];
     if (!input) continue;
@@ -487,6 +488,7 @@ function openPlan(plan = null) {
   data.sources.forEach((value) => appendRow("source", value));
   data.remotes.forEach((value) => appendRow("remote", value));
   updateArchiveHint();
+  updateRetentionControls();
   $("#planDialog").showModal();
   setTimeout(() => form.elements.name.focus(), 30);
 }
@@ -604,10 +606,14 @@ function collectPlan() {
     sources: $$(".source-row").map((row) => ({ name: $('[data-field="name"]', row).value.trim(), path: $('[data-field="path"]', row).value.trim() })),
     archive: { kind: value("archive_kind"), password: value("archive_password"), suffix: value("archive_suffix") },
     remotes: $$(".remote-row").map((row) => ({ name: $('[data-field="name"]', row).value.trim(), directory: $('[data-field="directory"]', row).value.trim() })),
-    retention: { keep_days: number("keep_days"), keep_count: number("keep_count") },
+    retention: {
+      keep_days: form.elements.keep_days.disabled ? 0 : number("keep_days"),
+      keep_count: form.elements.keep_count.disabled ? 0 : number("keep_count"),
+    },
     retry: { max_attempts: number("retry_count") + 1, initial_delay_seconds: number("initial_delay"), max_delay_seconds: number("max_delay"), backoff: value("backoff") },
     notifications: { ping: {}, mail: {}, serverchan: {} },
     rclone_flags: splitArgs(value("rclone_flags")),
+    remote_check_concurrency: number("remote_check_concurrency"),
   };
 }
 
@@ -886,6 +892,18 @@ function updateArchiveHint() {
   $("#archiveSecurityHint").textContent = t(kind === "7z" ? "secureArchiveHint" : kind === "zip" ? "compatibleArchiveHint" : "nativeDirectoryHint");
   form.elements.archive_password.disabled = kind === "none";
   $("[data-action=\"toggle-password\"]", form).disabled = kind === "none";
+  updateRetentionControls();
+}
+
+function updateRetentionControls() {
+  const form = $("#planForm");
+  const archiveEnabled = form.elements.archive_kind.value !== "none";
+  for (const name of ["keep_days", "keep_count"]) {
+    const toggle = form.elements[`${name}_enabled`];
+    const input = form.elements[name];
+    toggle.disabled = !archiveEnabled;
+    input.disabled = !archiveEnabled || !toggle.checked;
+  }
 }
 
 document.addEventListener("click", (event) => {
@@ -913,6 +931,9 @@ $("#remoteForm").addEventListener("submit", saveRemote);
 $("#notificationForm").addEventListener("submit", saveNotifications);
 $("#providerSelect").addEventListener("change", selectProvider);
 $("#planForm").elements.archive_kind.addEventListener("change", updateArchiveHint);
+$("#planForm").addEventListener("change", (event) => {
+  if (["keep_days_enabled", "keep_count_enabled"].includes(event.target.name)) updateRetentionControls();
+});
 $("#planForm").addEventListener("input", (event) => {
   if (["schedule_mode", "schedule_kind", "schedule_time", "schedule_weekday", "schedule_monthday", "schedule_interval", "timezone"].includes(event.target.name)) updateScheduleBuilder();
 });

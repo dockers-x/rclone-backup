@@ -4,6 +4,8 @@ use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
 pub const REDACTED: &str = "••••••••";
+pub const DEFAULT_REMOTE_CHECK_CONCURRENCY: usize = 4;
+pub const MAX_REMOTE_CHECK_CONCURRENCY: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Plan {
@@ -20,6 +22,8 @@ pub struct Plan {
     pub notifications: NotificationConfig,
     #[serde(default)]
     pub rclone_flags: Vec<String>,
+    #[serde(default = "default_remote_check_concurrency")]
+    pub remote_check_concurrency: usize,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -47,6 +51,8 @@ pub struct PlanInput {
     pub notifications: NotificationConfig,
     #[serde(default)]
     pub rclone_flags: Vec<String>,
+    #[serde(default = "default_remote_check_concurrency")]
+    pub remote_check_concurrency: usize,
 }
 
 impl PlanInput {
@@ -121,6 +127,11 @@ impl PlanInput {
         if self.rclone_flags.len() > 64 || self.rclone_flags.iter().any(|v| v.contains('\0')) {
             return Err("invalid rclone flags".into());
         }
+        if !(1..=MAX_REMOTE_CHECK_CONCURRENCY).contains(&self.remote_check_concurrency) {
+            return Err(format!(
+                "remote check concurrency must be between 1 and {MAX_REMOTE_CHECK_CONCURRENCY}"
+            ));
+        }
         const BLOCKED_FLAGS: &[&str] = &[
             "--config",
             "--password-command",
@@ -163,6 +174,7 @@ impl PlanInput {
             retry: self.retry,
             notifications: self.notifications,
             rclone_flags: self.rclone_flags,
+            remote_check_concurrency: self.remote_check_concurrency,
             created_at,
             updated_at: Utc::now(),
         }
@@ -983,6 +995,9 @@ fn default_schedule() -> String {
 fn default_timezone() -> String {
     "UTC".into()
 }
+const fn default_remote_check_concurrency() -> usize {
+    DEFAULT_REMOTE_CHECK_CONCURRENCY
+}
 fn default_suffix() -> String {
     "%Y%m%d-%H%M%S".into()
 }
@@ -1002,6 +1017,47 @@ fn default_backoff() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn valid_plan_input() -> PlanInput {
+        serde_json::from_value(serde_json::json!({
+            "name": "backup",
+            "sources": [{ "name": "data", "path": "/data" }],
+            "remotes": [{ "name": "remote", "directory": "/backup" }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn remote_check_concurrency_defaults_for_existing_plans() {
+        let input = valid_plan_input();
+
+        assert_eq!(
+            input.remote_check_concurrency,
+            DEFAULT_REMOTE_CHECK_CONCURRENCY
+        );
+        assert!(input.validate().is_ok());
+    }
+
+    #[test]
+    fn remote_check_concurrency_accepts_documented_range() {
+        for concurrency in [1, MAX_REMOTE_CHECK_CONCURRENCY] {
+            let mut input = valid_plan_input();
+            input.remote_check_concurrency = concurrency;
+            assert!(input.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn remote_check_concurrency_rejects_values_outside_documented_range() {
+        for concurrency in [0, MAX_REMOTE_CHECK_CONCURRENCY + 1] {
+            let mut input = valid_plan_input();
+            input.remote_check_concurrency = concurrency;
+            assert_eq!(
+                input.validate().unwrap_err(),
+                "remote check concurrency must be between 1 and 32"
+            );
+        }
+    }
 
     #[test]
     fn exponential_retry_is_capped() {

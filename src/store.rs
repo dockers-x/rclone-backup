@@ -454,6 +454,7 @@ mod tests {
                 ..Default::default()
             },
             rclone_flags: vec![],
+            remote_check_concurrency: crate::model::DEFAULT_REMOTE_CHECK_CONCURRENCY,
         };
         input.into_plan(Uuid::new_v4(), now)
     }
@@ -509,6 +510,7 @@ mod tests {
                 retry: Default::default(),
                 notifications: Default::default(),
                 rclone_flags: vec![],
+                remote_check_concurrency: crate::model::DEFAULT_REMOTE_CHECK_CONCURRENCY,
             };
             plans.push(input.into_plan(Uuid::new_v4(), now));
         }

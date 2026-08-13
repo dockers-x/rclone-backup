@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>{{SITE_NAME}}</title>
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/app.css?v={{ASSET_VERSION}}">
 </head>
 <body>
   <a class="skip-link" href="#main" data-i18n="skip">跳到主要内容</a>
@@ -170,20 +170,28 @@
         <section class="form-section"><div class="form-section-title"><span>02</span><div><h3 data-i18n="sourcesTargets">数据源与目标</h3><p data-i18n="sourcesTargetsHint">支持多个文件夹和 rclone 远端</p></div></div>
           <div class="repeat-group"><div class="repeat-header"><strong data-i18n="folders">备份文件夹</strong><button type="button" class="text-button" data-action="add-source"><svg><use href="#i-plus"/></svg><span data-i18n="add">添加</span></button></div><div id="sourcesEditor"></div></div>
           <div class="repeat-group"><div class="repeat-header"><strong data-i18n="remoteTargets">远端目标</strong><button type="button" class="text-button" data-action="add-remote"><svg><use href="#i-plus"/></svg><span data-i18n="add">添加</span></button></div><div id="remotesEditor"></div></div>
-          <label class="field"><span data-i18n="rcloneFlags">Rclone 全局参数</span><input name="rclone_flags" placeholder="--transfers 4 --checkers 8"><small data-i18n="flagsHint">使用 shell 风格引号解析，但不会通过 shell 执行</small></label>
+          <div class="form-grid">
+            <label class="field"><span data-i18n="remoteCheckConcurrency">连接检查并行数</span><input name="remote_check_concurrency" type="number" min="1" max="32" value="4" required><small data-i18n="remoteCheckConcurrencyHint">同时检查或创建远端目录的最大数量</small></label>
+            <label class="field"><span data-i18n="rcloneFlags">Rclone 全局参数</span><input name="rclone_flags" placeholder="--transfers 4 --checkers 8"><small data-i18n="flagsHint">使用 shell 风格引号解析，但不会通过 shell 执行</small></label>
+          </div>
         </section>
 
-        <details class="form-section disclosure" open><summary><div class="form-section-title"><span>03</span><div><h3 data-i18n="archiveRetention">归档、加密与保留</h3><p data-i18n="archiveRetentionHint">生成可直接下载和解压恢复的标准归档</p></div></div><svg><use href="#i-chevron"/></svg></summary>
+        <details class="form-section disclosure" open><summary><div class="form-section-title"><span>03</span><div><h3 data-i18n="archiveEncryption">归档与加密</h3><p data-i18n="archiveEncryptionHint">生成可直接下载和解压恢复的标准归档</p></div></div><svg><use href="#i-chevron"/></svg></summary>
           <div class="form-grid details-content">
             <label class="field"><span data-i18n="archiveType">归档格式</span><select name="archive_kind"><option value="7z" data-i18n="secureArchive">7z · 安全优先（推荐）</option><option value="zip" data-i18n="compatibleArchive">ZIP · 兼容优先</option><option value="none" data-i18n="nativeDirectory">原生目录 · 依赖 rclone 恢复</option></select></label>
             <label class="field"><span data-i18n="archivePassword">归档密码（可选）</span><span class="password-field"><input name="archive_password" type="password" autocomplete="new-password"><button type="button" class="password-toggle" data-action="toggle-password" aria-label="显示密码" aria-pressed="false"><svg><use href="#i-eye"/></svg></button></span><small id="archiveSecurityHint" data-i18n="secureArchiveHint">设置后使用 AES-256 并加密文件名，常见 7z 软件可直接恢复。</small></label>
             <label class="field"><span data-i18n="fileSuffix">文件名时间格式</span><input name="archive_suffix" value="%Y%m%d-%H%M%S" required></label>
-            <label class="field"><span data-i18n="keepDays">保留天数</span><input name="keep_days" type="number" min="0" max="36500" value="0"></label>
-            <label class="field"><span data-i18n="keepCount">保留份数</span><input name="keep_count" type="number" min="0" max="100000" value="0"></label>
           </div>
         </details>
 
-        <details class="form-section disclosure" open><summary><div class="form-section-title"><span>04</span><div><h3 data-i18n="retryPolicy">重试策略</h3><p data-i18n="retryHint">在网络或远端临时故障时自动恢复</p></div></div><svg><use href="#i-chevron"/></svg></summary>
+        <details class="form-section disclosure" open><summary><div class="form-section-title"><span>04</span><div><h3 data-i18n="backupRetentionPolicy">备份保留策略</h3><p data-i18n="backupRetentionHint">按时间或数量自动清理旧备份，可独立启用</p></div></div><svg><use href="#i-chevron"/></svg></summary>
+          <div class="form-grid details-content retention-grid">
+            <label class="retention-option"><span><input name="keep_days_enabled" type="checkbox"><strong data-i18n="keepDays">保留天数</strong></span><input name="keep_days" type="number" min="1" max="36500" value="30" disabled required><small data-i18n="keepDaysHint">删除超过指定天数的备份</small></label>
+            <label class="retention-option"><span><input name="keep_count_enabled" type="checkbox"><strong data-i18n="keepCount">保留份数</strong></span><input name="keep_count" type="number" min="1" max="100000" value="10" disabled required><small data-i18n="keepCountHint">仅保留最新的指定份数</small></label>
+          </div>
+        </details>
+
+        <details class="form-section disclosure" open><summary><div class="form-section-title"><span>05</span><div><h3 data-i18n="retryPolicy">重试策略</h3><p data-i18n="retryHint">在网络或远端临时故障时自动恢复</p></div></div><svg><use href="#i-chevron"/></svg></summary>
           <div class="form-grid details-content">
             <label class="field"><span data-i18n="maxAttempts">失败重试次数</span><input name="retry_count" type="number" min="0" max="19" value="2" required><small data-i18n="retryCountHint">不包含首次执行；填 0 表示失败后不重试</small></label>
             <label class="field"><span data-i18n="backoff">退避方式</span><select name="backoff"><option value="exponential" data-i18n="exponential">指数退避</option><option value="fixed" data-i18n="fixed">固定间隔</option></select></label>
@@ -222,6 +230,6 @@
 
   <template id="sourceTemplate"><div class="repeat-row source-row"><label class="field"><span data-i18n="label">名称</span><input data-field="name" required maxlength="80" placeholder="data"></label><label class="field grow"><span data-i18n="path">绝对路径</span><input data-field="path" required placeholder="/data"></label><button type="button" class="icon-button danger" data-action="remove-row" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
   <template id="remoteTemplate"><div class="repeat-row remote-row"><label class="field"><span data-i18n="remoteName">Rclone 远端名</span><select data-field="name" required><option value="">—</option></select></label><label class="field grow"><span data-i18n="remoteDir">远端目录</span><input data-field="directory" required placeholder="/RcloneBackup/"></label><button type="button" class="icon-button danger" data-action="remove-row" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v={{ASSET_VERSION}}" defer></script>
 </body>
 </html>
