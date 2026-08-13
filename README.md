@@ -9,7 +9,7 @@ Rclone Backup v2 is a Rust backup service with an embedded bilingual Web UI. It 
   - **7z**: recommended; an optional password enables AES-256 and filename encryption.
   - **ZIP**: optional password uses broadly compatible ZipCrypto, with a security warning in the UI.
   - **Native directory**: no archive; restore through rclone.
-- Flexible Cron schedules, IANA timezones, configurable retries, retention by age/count, and shared global notifications.
+- Friendly daily, weekly, monthly, and interval schedules with an advanced Cron mode, IANA timezones, configurable retries, retention by age/count, and shared global notifications.
 - Storage account wizard backed by rclone's provider schema. Every account can be tested.
 - Chinese/English, light/dark/system themes, and a responsive mobile layout.
 - Public authentication is off by default. Optional Basic Auth is available through environment variables.

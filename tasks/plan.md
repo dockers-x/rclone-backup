@@ -30,3 +30,12 @@
 - API masking and update tests pass before UI integration.
 - Browser validation covers 375px and desktop, both themes, keyboard focus, and
   reduced motion before release.
+
+## Simple schedule follow-up
+
+1. Add a schedule mode switch and progressive simple-rule fields to the plan
+   form without changing the persisted Plan schema.
+2. Implement exact Cron recognition and generation for daily, weekly, monthly,
+   and clock-aligned second/minute/hour intervals.
+3. Prove generated schedules in Rust tests and browser-test both editable modes,
+   bilingual copy, and narrow layouts before updating the release commit.

@@ -154,7 +154,7 @@ impl PlanInput {
             id,
             name: self.name.trim().to_owned(),
             enabled: self.enabled,
-            schedule: self.schedule.trim().to_owned(),
+            schedule: self.schedule,
             timezone: self.timezone.trim().to_owned(),
             sources: self.sources,
             archive: self.archive,

@@ -11,9 +11,10 @@ const translations = {
     recentRuns: "最近运行", destinations: "远端目标", configuration: "配置", backupPlans: "备份方案",
     noPlans: "还没有备份方案", noPlansHint: "创建第一个方案，选择数据源、远端目标和重试策略。",
     createPlan: "创建方案", activity: "活动", recentHistory: "最近运行", refresh: "刷新",
-    basics: "基础设置", basicsHint: "名称、运行状态与定时规则", planName: "方案名称", schedule: "Cron 表达式",
-    scheduleHint: "例如：每天凌晨 2 点 = 0 2 * * *", timezone: "时区", enabled: "启用自动备份",
-    enabledHint: "保存后调度器将按 Cron 规则运行", sourcesTargets: "数据源与目标",
+    basics: "基础设置", basicsHint: "名称、运行状态与定时规则", planName: "方案名称", schedule: "Cron 表达式", scheduleMode: "定时方式", simpleSchedule: "简单定时",
+    scheduleHint: "支持 5、6 或 7 段 Cron，例如：0 2 * * *", timezone: "时区", enabled: "启用自动备份",
+    enabledHint: "保存后调度器将按当前定时规则运行", scheduleFrequency: "运行频率", daily: "每天", weekly: "每周", monthly: "每月", everyHours: "每隔几小时", everyMinutes: "每隔几分钟", everySeconds: "每隔几秒", runAt: "运行时间", weekday: "星期", monthday: "每月日期", monthdayHint: "没有该日期的月份会跳过", interval: "间隔", hoursUnit: "小时", minutesUnit: "分钟", secondsUnit: "秒", monday: "星期一", tuesday: "星期二", wednesday: "星期三", thursday: "星期四", friday: "星期五", saturday: "星期六", sunday: "星期日", schedulePreview: "{summary}",
+    sourcesTargets: "数据源与目标",
     sourcesTargetsHint: "支持多个文件夹和 rclone 远端", folders: "备份文件夹", add: "添加",
     remoteTargets: "远端目标", rcloneFlags: "Rclone 全局参数", flagsHint: "使用 shell 风格引号解析，但不会通过 shell 执行",
     none: "不备份", archiveRetention: "归档、加密与保留", archiveRetentionHint: "生成可直接下载和解压恢复的标准归档",
@@ -56,9 +57,10 @@ const translations = {
     recentRuns: "Recent runs", destinations: "Destinations", configuration: "Configuration", backupPlans: "Backup plans",
     noPlans: "No backup plans yet", noPlansHint: "Create your first plan and choose sources, destinations, and retry behavior.",
     createPlan: "Create plan", activity: "Activity", recentHistory: "Recent runs", refresh: "Refresh",
-    basics: "Basics", basicsHint: "Name, status, and schedule", planName: "Plan name", schedule: "Cron expression",
-    scheduleHint: "Example: daily at 02:00 = 0 2 * * *", timezone: "Timezone", enabled: "Enable automatic backup",
-    enabledHint: "The scheduler will use this Cron rule after saving", sourcesTargets: "Sources & destinations",
+    basics: "Basics", basicsHint: "Name, status, and schedule", planName: "Plan name", schedule: "Cron expression", scheduleMode: "Schedule mode", simpleSchedule: "Simple schedule",
+    scheduleHint: "Supports 5, 6, or 7 Cron fields, for example: 0 2 * * *", timezone: "Timezone", enabled: "Enable automatic backup",
+    enabledHint: "The scheduler will use this schedule after saving", scheduleFrequency: "Frequency", daily: "Daily", weekly: "Weekly", monthly: "Monthly", everyHours: "Every few hours", everyMinutes: "Every few minutes", everySeconds: "Every few seconds", runAt: "Run at", weekday: "Weekday", monthday: "Day of month", monthdayHint: "Months without this date are skipped", interval: "Interval", hoursUnit: "hours", minutesUnit: "minutes", secondsUnit: "seconds", monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday", thursday: "Thursday", friday: "Friday", saturday: "Saturday", sunday: "Sunday", schedulePreview: "{summary}",
+    sourcesTargets: "Sources & destinations",
     sourcesTargetsHint: "Multiple folders and rclone remotes are supported", folders: "Backup folders", add: "Add",
     remoteTargets: "Remote destinations", rcloneFlags: "Global rclone flags", flagsHint: "Parsed with shell-style quoting but never executed through a shell",
     none: "None", archiveRetention: "Archive, encryption & retention", archiveRetentionHint: "Create a standard archive that can be downloaded and extracted directly",
@@ -129,7 +131,7 @@ function applyPreferences() {
   $$("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });
   const passwordToggle = $("[data-action=\"toggle-password\"]");
   if (passwordToggle) passwordToggle.setAttribute("aria-label", t(passwordToggle.getAttribute("aria-pressed") === "true" ? "hidePassword" : "showPassword"));
-  if ($("#planDialog")?.open) updateArchiveHint();
+  if ($("#planDialog")?.open) { updateArchiveHint(); updateScheduleBuilder(); }
   updateNavigation();
 }
 
@@ -354,7 +356,7 @@ function openPlan(plan = null) {
   $("#remotesEditor").innerHTML = "";
   $("#dialogTitle").textContent = plan ? t("edit") : t("newPlan");
   const data = plan || {
-    name: "", enabled: true, schedule: "5 * * * *", timezone: "UTC",
+    name: "", enabled: true, schedule: "0 0 2 * * *", timezone: "UTC",
     sources: [{ name: "data", path: "/data" }], remotes: [{ name: "RcloneBackup", directory: "/RcloneBackup/" }],
     archive: { kind: "7z", password: "", suffix: "%Y%m%d-%H%M%S" },
     retention: { keep_days: 0, keep_count: 0 }, retry: { max_attempts: 3, initial_delay_seconds: 10, max_delay_seconds: 300, backoff: "exponential" },
@@ -371,6 +373,16 @@ function openPlan(plan = null) {
     if (!input) continue;
     if (input.type === "checkbox") input.checked = Boolean(value); else input.value = value ?? "";
   }
+  const simpleSchedule = parseSimpleSchedule(data.schedule);
+  form.elements.schedule_mode.value = simpleSchedule ? "simple" : "cron";
+  if (simpleSchedule) {
+    form.elements.schedule_kind.value = simpleSchedule.kind;
+    if (simpleSchedule.time) form.elements.schedule_time.value = simpleSchedule.time;
+    if (simpleSchedule.weekday) form.elements.schedule_weekday.value = simpleSchedule.weekday;
+    if (simpleSchedule.monthday) form.elements.schedule_monthday.value = simpleSchedule.monthday;
+    if (simpleSchedule.interval) form.elements.schedule_interval.value = simpleSchedule.interval;
+  }
+  updateScheduleBuilder();
   data.sources.forEach((value) => appendRow("source", value));
   data.remotes.forEach((value) => appendRow("remote", value));
   updateArchiveHint();
@@ -392,13 +404,102 @@ function splitArgs(value) {
 }
 function joinArgs(values) { return values.map((value) => /\s/.test(value) ? JSON.stringify(value) : value).join(" "); }
 
+const simpleScheduleKinds = new Set(["daily", "weekly", "monthly", "every_hours", "every_minutes", "every_seconds"]);
+
+function parseSimpleSchedule(schedule) {
+  const fields = schedule.trim().split(/\s+/);
+  const normalized = fields.length === 5 ? ["0", ...fields] : fields.length === 6 ? fields : null;
+  if (!normalized) return null;
+  const [second, minute, hour, monthday, month, weekday] = normalized;
+  if (month !== "*") return null;
+  if (/^(?:[0-9]|[1-5]\d)$/.test(minute) && /^(?:[0-9]|1\d|2[0-3])$/.test(hour)) {
+    const time = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+    if (second === "0" && monthday === "*" && weekday === "*") return { kind: "daily", time };
+    if (second === "0" && monthday === "*" && /^(MON|TUE|WED|THU|FRI|SAT|SUN)$/.test(weekday)) return { kind: "weekly", time, weekday };
+    if (second === "0" && /^([1-9]|[12]\d|3[01])$/.test(monthday) && weekday === "*") return { kind: "monthly", time, monthday };
+  }
+  let match = second.match(/^0\/([1-9]|[1-5]\d)$/);
+  if (match && minute === "*" && hour === "*" && monthday === "*" && weekday === "*") return { kind: "every_seconds", interval: match[1] };
+  match = minute.match(/^0\/([1-9]|[1-5]\d)$/);
+  if (second === "0" && match && hour === "*" && monthday === "*" && weekday === "*") return { kind: "every_minutes", interval: match[1] };
+  match = hour.match(/^0\/([1-9]|1\d|2[0-3])$/);
+  if (second === "0" && minute === "0" && match && monthday === "*" && weekday === "*") return { kind: "every_hours", interval: match[1] };
+  return null;
+}
+
+function buildSimpleSchedule(form) {
+  const kind = form.elements.schedule_kind.value;
+  const [hour, minute] = form.elements.schedule_time.value.split(":");
+  const interval = Number(form.elements.schedule_interval.value);
+  if (kind === "daily") return `0 ${Number(minute)} ${Number(hour)} * * *`;
+  if (kind === "weekly") return `0 ${Number(minute)} ${Number(hour)} * * ${form.elements.schedule_weekday.value}`;
+  if (kind === "monthly") return `0 ${Number(minute)} ${Number(hour)} ${Number(form.elements.schedule_monthday.value)} * *`;
+  if (kind === "every_hours") return `0 0 0/${interval} * * *`;
+  if (kind === "every_minutes") return `0 0/${interval} * * * *`;
+  return `0/${interval} * * * * *`;
+}
+
+function simpleScheduleSummary(form) {
+  const kind = form.elements.schedule_kind.value;
+  const time = form.elements.schedule_time.value;
+  const interval = form.elements.schedule_interval.value;
+  const timezone = form.elements.timezone.value.trim() || "UTC";
+  const weekdayKeys = { MON: "monday", TUE: "tuesday", WED: "wednesday", THU: "thursday", FRI: "friday", SAT: "saturday", SUN: "sunday" };
+  const weekday = t(weekdayKeys[form.elements.schedule_weekday.value] || "monday");
+  if (state.language === "zh") {
+    if (kind === "daily") return `每天 ${time} · ${timezone}`;
+    if (kind === "weekly") return `每周${weekday} ${time} · ${timezone}`;
+    if (kind === "monthly") return `每月 ${form.elements.schedule_monthday.value} 日 ${time} · ${timezone}`;
+    return `每 ${interval} ${t(kind === "every_hours" ? "hoursUnit" : kind === "every_minutes" ? "minutesUnit" : "secondsUnit")} · ${timezone}`;
+  }
+  if (kind === "daily") return `Daily at ${time} · ${timezone}`;
+  if (kind === "weekly") return `Every ${weekday} at ${time} · ${timezone}`;
+  if (kind === "monthly") return `Monthly on day ${form.elements.schedule_monthday.value} at ${time} · ${timezone}`;
+  return `Every ${interval} ${t(kind === "every_hours" ? "hoursUnit" : kind === "every_minutes" ? "minutesUnit" : "secondsUnit")} · ${timezone}`;
+}
+
+function updateScheduleBuilder() {
+  const form = $("#planForm");
+  const simple = form.elements.schedule_mode.value === "simple";
+  $("#simpleScheduleFields").hidden = !simple;
+  $("#cronScheduleField").hidden = simple;
+  form.elements.schedule.required = !simple;
+  if (!simple) {
+    form.elements.schedule_time.required = false;
+    form.elements.schedule_weekday.required = false;
+    form.elements.schedule_monthday.required = false;
+    form.elements.schedule_interval.required = false;
+    return;
+  }
+  const kind = form.elements.schedule_kind.value;
+  if (!simpleScheduleKinds.has(kind)) form.elements.schedule_kind.value = "daily";
+  const currentKind = form.elements.schedule_kind.value;
+  const timed = ["daily", "weekly", "monthly"].includes(currentKind);
+  $("[data-schedule-field=\"time\"]").hidden = !timed;
+  $("[data-schedule-field=\"weekday\"]").hidden = currentKind !== "weekly";
+  $("[data-schedule-field=\"monthday\"]").hidden = currentKind !== "monthly";
+  $("[data-schedule-field=\"interval\"]").hidden = timed;
+  form.elements.schedule_time.required = timed;
+  form.elements.schedule_weekday.required = currentKind === "weekly";
+  form.elements.schedule_monthday.required = currentKind === "monthly";
+  form.elements.schedule_interval.required = !timed;
+  const limits = currentKind === "every_hours" ? [23, "hoursUnit"] : currentKind === "every_minutes" ? [59, "minutesUnit"] : [59, "secondsUnit"];
+  form.elements.schedule_interval.max = limits[0];
+  if (Number(form.elements.schedule_interval.value) > limits[0]) form.elements.schedule_interval.value = limits[0];
+  $("#scheduleIntervalUnit").textContent = t(limits[1]);
+  const schedule = buildSimpleSchedule(form);
+  form.elements.schedule.value = schedule;
+  $("#generatedSchedule").textContent = schedule;
+  $("#scheduleSummary").textContent = simpleScheduleSummary(form);
+}
+
 function collectPlan() {
   const form = $("#planForm");
   if (!form.reportValidity()) throw new Error(t("formInvalid"));
   const value = (name) => form.elements[name]?.value?.trim() || "";
   const number = (name) => Number(form.elements[name]?.value || 0);
   return {
-    name: value("name"), enabled: form.elements.enabled.checked, schedule: value("schedule"), timezone: value("timezone"),
+    name: value("name"), enabled: form.elements.enabled.checked, schedule: form.elements.schedule_mode.value === "simple" ? buildSimpleSchedule(form) : form.elements.schedule.value, timezone: value("timezone"),
     sources: $$(".source-row").map((row) => ({ name: $('[data-field="name"]', row).value.trim(), path: $('[data-field="path"]', row).value.trim() })),
     archive: { kind: value("archive_kind"), password: value("archive_password"), suffix: value("archive_suffix") },
     remotes: $$(".remote-row").map((row) => ({ name: $('[data-field="name"]', row).value.trim(), directory: $('[data-field="directory"]', row).value.trim() })),
@@ -673,6 +774,12 @@ $("#remoteForm").addEventListener("submit", saveRemote);
 $("#notificationForm").addEventListener("submit", saveNotifications);
 $("#providerSelect").addEventListener("change", selectProvider);
 $("#planForm").elements.archive_kind.addEventListener("change", updateArchiveHint);
+$("#planForm").addEventListener("input", (event) => {
+  if (["schedule_mode", "schedule_kind", "schedule_time", "schedule_weekday", "schedule_monthday", "schedule_interval", "timezone"].includes(event.target.name)) updateScheduleBuilder();
+});
+$("#planForm").addEventListener("change", (event) => {
+  if (["schedule_mode", "schedule_kind", "schedule_weekday"].includes(event.target.name)) updateScheduleBuilder();
+});
 $$("dialog").forEach((dialog) => dialog.addEventListener("click", (event) => {
   const rect = dialog.getBoundingClientRect();
   if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();

@@ -27,3 +27,10 @@
   - Acceptance: docs describe global settings and all gates pass.
   - Verify: commands in `docs/spec-global-notifications.md`.
   - Files: `README.md`, `tasks/todo.md`.
+- [x] Add simple schedule controls while preserving Cron compatibility.
+  - Acceptance: daily, weekly, monthly, and N-second/minute/hour rules compile
+    to valid Cron; unrecognized existing Cron stays unchanged in Cron mode.
+  - Verify: schedule unit tests, `node --check web/app.js`, and browser checks at
+    desktop and 375px.
+  - Files: `web/index.html`, `web/app.js`, `web/app.css`, `src/main.rs`,
+    `src/schedule.rs`.

@@ -8,11 +8,17 @@ use rclone_backup::{
     schedule::is_due_in_timezone,
     store::Store,
 };
-use std::{collections::HashMap, env, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    time::Duration,
+};
 use tokio::{net::TcpListener, process::Command};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
+
+const MAX_SCHEDULED_BACKUPS: usize = 2;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -113,7 +119,8 @@ async fn backup(config: AppConfig, id: Option<&String>) -> anyhow::Result<()> {
 fn spawn_scheduler(store: Store, runner: Runner) {
     tokio::spawn(async move {
         let mut last_slots = HashMap::new();
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        let mut activity = SchedulerActivity::default();
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
             if !runner.rclone_ready() {
@@ -123,10 +130,18 @@ fn spawn_scheduler(store: Store, runner: Runner) {
             match store.list_plans().await {
                 Ok(plans) => {
                     for plan in plans.into_iter().filter(|plan| plan.enabled) {
+                        if !activity.should_evaluate(plan.id, runner.is_active(plan.id).await) {
+                            last_slots.insert(plan.id, now);
+                            continue;
+                        }
                         let last = last_slots.get(&plan.id).copied();
                         if is_due_in_timezone(&plan.schedule, &plan.timezone, now, last) {
                             last_slots.insert(plan.id, now);
-                            if let Err(error) = runner.clone().start(plan, "schedule").await {
+                            if let Err(error) = runner
+                                .clone()
+                                .start_scheduled(plan, "schedule", MAX_SCHEDULED_BACKUPS)
+                                .await
+                            {
                                 warn!(%error, "scheduled plan skipped");
                             }
                         }
@@ -136,6 +151,21 @@ fn spawn_scheduler(store: Store, runner: Runner) {
             }
         }
     });
+}
+
+#[derive(Default)]
+struct SchedulerActivity {
+    active_last_tick: HashSet<Uuid>,
+}
+
+impl SchedulerActivity {
+    fn should_evaluate(&mut self, plan_id: Uuid, is_active: bool) -> bool {
+        if is_active {
+            self.active_last_tick.insert(plan_id);
+            return false;
+        }
+        !self.active_last_tick.remove(&plan_id)
+    }
 }
 
 fn spawn_readiness_probe(runner: Runner) {
@@ -218,4 +248,21 @@ fn print_help() {
         "rclone-backup {}\n\nUsage:\n  rclone-backup [serve]\n  rclone-backup backup [PLAN_ID]\n  rclone-backup ping\n  rclone-backup mail\n  rclone-backup serverchan\n  rclone-backup <rclone|7z|curl|mail> [args...]\n\nNotification tests use the confirmed global configuration. The default command starts the Web UI.",
         env!("CARGO_PKG_VERSION")
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SchedulerActivity;
+    use uuid::Uuid;
+
+    #[test]
+    fn scheduler_consumes_slots_across_an_active_to_idle_transition() {
+        let plan_id = Uuid::new_v4();
+        let mut activity = SchedulerActivity::default();
+
+        assert!(activity.should_evaluate(plan_id, false));
+        assert!(!activity.should_evaluate(plan_id, true));
+        assert!(!activity.should_evaluate(plan_id, false));
+        assert!(activity.should_evaluate(plan_id, false));
+    }
 }

@@ -171,14 +171,38 @@ impl Runner {
     }
 
     pub async fn start(self, plan: Plan, trigger: &str) -> anyhow::Result<String> {
+        self.start_with_limit(plan, trigger, None)
+            .await?
+            .ok_or_else(|| anyhow!("unlimited backup start was skipped"))
+    }
+
+    pub async fn start_scheduled(
+        self,
+        plan: Plan,
+        trigger: &str,
+        max_active: usize,
+    ) -> anyhow::Result<Option<String>> {
+        self.start_with_limit(plan, trigger, Some(max_active)).await
+    }
+
+    async fn start_with_limit(
+        self,
+        plan: Plan,
+        trigger: &str,
+        max_active: Option<usize>,
+    ) -> anyhow::Result<Option<String>> {
         if !self.rc.is_ready() {
             bail!("RCLONE_NOT_READY: configure at least one rclone remote first");
         }
         {
             let mut active = self.active.lock().await;
-            if !active.insert(plan.id) {
+            if active.contains(&plan.id) {
                 bail!("plan is already running");
             }
+            if max_active.is_some_and(|limit| active.len() >= limit) {
+                return Ok(None);
+            }
+            active.insert(plan.id);
         }
         let run = match self.store.start_run(&plan, trigger).await {
             Ok(run) => run,
@@ -193,7 +217,7 @@ impl Runner {
                 warn!(%error, "backup run failed");
             }
         });
-        Ok(run_id)
+        Ok(Some(run_id))
     }
 
     pub async fn execute_sync(&self, plan: Plan, trigger: &str) -> anyhow::Result<()> {

@@ -44,6 +44,8 @@ Rclone Backup v2 is a long-running Rust Web service for directory backups. It do
 - `RCLONE_BACKUP_PLANS` can seed multiple plans once.
 - Database-export environment variables do not create backup work in v2.
 - The default command starts the service; `backup`, global notification tests, and command passthrough remain available.
+- The Web UI can generate daily, weekly, monthly, and clock-aligned interval
+  schedules while preserving unrecognized existing Cron expressions unchanged.
 
 ## Release gates
 
