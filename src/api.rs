@@ -109,6 +109,7 @@ fn static_asset(content: &'static str, content_type: &'static str) -> Response {
 struct Health {
     status: &'static str,
     version: &'static str,
+    rclone_version: Option<String>,
     site_name: String,
     time: chrono::DateTime<Utc>,
 }
@@ -116,6 +117,7 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
     Json(Health {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
+        rclone_version: state.runner.rclone_version().map(str::to_owned),
         site_name: state.site_name,
         time: Utc::now(),
     })

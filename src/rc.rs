@@ -21,6 +21,7 @@ pub struct RcloneRc {
     url: String,
     user: String,
     password: String,
+    version: String,
     ready: Arc<AtomicBool>,
     _child: Arc<Mutex<Child>>,
 }
@@ -48,16 +49,18 @@ impl RcloneRc {
             .kill_on_drop(true)
             .spawn()
             .context("start private rclone RC daemon")?;
-        let rc = Self {
+        let mut rc = Self {
             client: Client::builder().timeout(Duration::from_secs(30)).build()?,
             url: "http://127.0.0.1:5572".into(),
             user,
             password,
+            version: String::new(),
             ready: Arc::new(AtomicBool::new(false)),
             _child: Arc::new(Mutex::new(child)),
         };
         for _ in 0..50 {
-            if rc.call("core/version", json!({})).await.is_ok() {
+            if let Ok(value) = rc.call("core/version", json!({})).await {
+                rc.version = rclone_version(&value).unwrap_or_default().to_owned();
                 return Ok(rc);
             }
             sleep(Duration::from_millis(100)).await;
@@ -143,6 +146,10 @@ impl RcloneRc {
 
     pub async fn stats(&self) -> anyhow::Result<Value> {
         self.call("core/stats", json!({})).await
+    }
+
+    pub fn version(&self) -> Option<&str> {
+        (!self.version.is_empty()).then_some(&self.version)
     }
 
     pub async fn providers(&self) -> anyhow::Result<Value> {
@@ -274,4 +281,23 @@ fn random_secret(length: usize) -> String {
         .take(length)
         .map(char::from)
         .collect()
+}
+
+fn rclone_version(value: &Value) -> Option<&str> {
+    value.get("version").and_then(Value::as_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rclone_version;
+    use serde_json::json;
+
+    #[test]
+    fn reads_version_from_core_version_response() {
+        assert_eq!(
+            rclone_version(&json!({ "version": "v1.75.0" })),
+            Some("v1.75.0")
+        );
+        assert_eq!(rclone_version(&json!({ "version": 175 })), None);
+    }
 }

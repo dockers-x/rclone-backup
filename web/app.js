@@ -166,7 +166,8 @@ async function loadAll() {
       api("/api/plans"), api("/api/runs?limit=50"), api("/api/status"), api("/api/health"), api("/api/rclone/remotes"), api("/api/notifications"),
     ]);
     Object.assign(state, { plans, runs, status, notifications, remotes: remoteResponse.remotes || [] });
-    $("#version").textContent = `v${health.version}`;
+    const rcloneVersion = health.rclone_version ? ` · rclone ${health.rclone_version}` : "";
+    $("#version").textContent = `v${health.version}${rcloneVersion}`;
     document.title = health.site_name;
     $("#siteName").textContent = health.site_name;
     render();

@@ -56,6 +56,10 @@ impl Runner {
             .unwrap_or_else(|_| serde_json::json!({}))
     }
 
+    pub fn rclone_version(&self) -> Option<&str> {
+        self.rc.version()
+    }
+
     pub async fn rclone_providers(&self) -> anyhow::Result<serde_json::Value> {
         self.rc.providers().await
     }
