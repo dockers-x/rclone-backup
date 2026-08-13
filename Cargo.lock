@@ -1314,31 +1314,117 @@ dependencies = [
 
 [[package]]
 name = "rclone-backup"
-version = "2.0.3"
+version = "2.0.4"
 dependencies = [
- "aes-gcm",
+ "anyhow",
+ "axum",
+ "chrono",
+ "rclone-backup-api",
+ "rclone-backup-core",
+ "rclone-backup-rclone",
+ "rclone-backup-runner",
+ "rclone-backup-store",
+ "serde_json",
+ "shell-words",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "rclone-backup-api"
+version = "2.0.4"
+dependencies = [
  "anyhow",
  "axum",
  "base64",
  "chrono",
- "chrono-tz",
- "cron",
- "rand 0.9.5",
- "reqwest",
- "rustix",
+ "rclone-backup-core",
+ "rclone-backup-runner",
+ "rclone-backup-store",
  "serde",
  "serde_json",
- "shell-words",
- "sqlx",
  "subtle",
  "tempfile",
- "thiserror",
  "tokio",
  "tower",
  "tower-http",
  "tracing",
- "tracing-subscriber",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "rclone-backup-core"
+version = "2.0.4"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "cron",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "rclone-backup-notifications"
+version = "2.0.4"
+dependencies = [
+ "anyhow",
+ "rclone-backup-core",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rclone-backup-rclone"
+version = "2.0.4"
+dependencies = [
+ "anyhow",
+ "rand 0.9.5",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rclone-backup-runner"
+version = "2.0.4"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "rclone-backup-core",
+ "rclone-backup-notifications",
+ "rclone-backup-rclone",
+ "rclone-backup-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "rclone-backup-store"
+version = "2.0.4"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "base64",
+ "chrono",
+ "rand 0.9.5",
+ "rclone-backup-core",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "tokio",
  "uuid",
 ]
 
@@ -1970,7 +2056,6 @@ dependencies = [
  "tower-service",
  "tracing",
  "url",
- "uuid",
 ]
 
 [[package]]

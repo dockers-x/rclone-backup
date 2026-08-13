@@ -1,11 +1,3 @@
-use crate::{
-    model::{
-        GlobalNotificationSettings, NotificationConfig, NotificationMigrationWarning, Plan,
-        PlanInput, REDACTED, RunRecord,
-    },
-    runner::Runner,
-    store::Store,
-};
 use axum::{
     Json, Router,
     body::Body,
@@ -17,6 +9,12 @@ use axum::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::Utc;
+use rclone_backup_core::{
+    GlobalNotificationSettings, NotificationConfig, NotificationTargetKind, Plan, PlanInput,
+    REDACTED, RunRecord,
+};
+use rclone_backup_runner::Runner;
+use rclone_backup_store::Store;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use subtle::ConstantTimeEq;
@@ -60,6 +58,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/plans", get(list_plans).post(create_plan))
         .route("/api/plans/{id}", put(update_plan).delete(delete_plan))
+        .route(
+            "/api/plans/{id}/archive-password",
+            post(reveal_archive_password),
+        )
         .route("/api/plans/{id}/run", post(run_plan))
         .route(
             "/api/notifications",
@@ -94,16 +96,19 @@ async fn index(State(state): State<AppState>) -> impl IntoResponse {
         .unwrap()
 }
 fn render_index_html(site_name: &str) -> String {
-    include_str!("../web/index.html")
+    include_str!("../../../web/index.html")
         .replace("{{SITE_NAME}}", &escape_html(site_name))
         .replace("{{ASSET_VERSION}}", env!("CARGO_PKG_VERSION"))
 }
 async fn css() -> impl IntoResponse {
-    static_asset(include_str!("../web/app.css"), "text/css; charset=utf-8")
+    static_asset(
+        include_str!("../../../web/app.css"),
+        "text/css; charset=utf-8",
+    )
 }
 async fn js() -> impl IntoResponse {
     static_asset(
-        include_str!("../web/app.js"),
+        include_str!("../../../web/app.js"),
         "text/javascript; charset=utf-8",
     )
 }
@@ -467,7 +472,7 @@ async fn openapi() -> impl IntoResponse {
 
 async fn api_docs() -> impl IntoResponse {
     static_asset(
-        include_str!("../web/api-docs.html"),
+        include_str!("../../../web/api-docs.html"),
         "text/html; charset=utf-8",
     )
 }
@@ -527,6 +532,38 @@ async fn delete_plan(State(state): State<AppState>, Path(id): Path<Uuid>) -> Api
     }
 }
 
+async fn reveal_archive_password(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Response> {
+    require_password_reveal_auth(state.public_auth.is_some())?;
+    let plan = state
+        .store
+        .get_plan(id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    Ok(archive_password_response(&plan.archive.password))
+}
+
+fn require_password_reveal_auth(authentication_enabled: bool) -> ApiResult<()> {
+    if !authentication_enabled {
+        return Err(ApiError::forbidden(
+            "enable web authentication before revealing archive passwords",
+        ));
+    }
+    Ok(())
+}
+
+fn archive_password_response(password: &str) -> Response {
+    let body = serde_json::to_vec(&json!({ "password": password }))
+        .expect("archive password response is serializable");
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(body))
+        .unwrap()
+}
+
 async fn run_plan(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -563,15 +600,12 @@ async fn list_runs(
 
 #[derive(Deserialize)]
 struct NotificationUpdate {
-    #[serde(default)]
-    config: Option<NotificationConfig>,
-    #[serde(default)]
-    candidate_plan_id: Option<Uuid>,
+    config: NotificationConfig,
 }
 
 #[derive(Deserialize)]
 struct NotificationTestInput {
-    channel: String,
+    target_id: String,
     #[serde(default)]
     config: Option<NotificationConfig>,
 }
@@ -580,7 +614,6 @@ struct NotificationTestInput {
 struct NotificationUpdateResponse {
     #[serde(flatten)]
     settings: GlobalNotificationSettings,
-    migration_warnings: Vec<NotificationMigrationWarning>,
 }
 
 async fn get_notifications(
@@ -595,51 +628,28 @@ async fn update_notifications(
     State(state): State<AppState>,
     Json(input): Json<NotificationUpdate>,
 ) -> ApiResult<Json<NotificationUpdateResponse>> {
-    if input.config.is_some() == input.candidate_plan_id.is_some() {
-        return Err(ApiError::validation(
-            "provide either config or candidate_plan_id".into(),
-        ));
-    }
     let existing = state.store.notification_settings().await?;
-    let (config, migration_warnings) = if let Some(candidate_id) = input.candidate_plan_id {
-        let candidate = existing
-            .candidates
-            .iter()
-            .find(|candidate| candidate.plan_id == candidate_id)
-            .map(|candidate| candidate.config.clone())
-            .ok_or_else(|| ApiError::validation("notification candidate not found".into()))?;
-        candidate.isolate_migration_channels().await
-    } else {
-        let mut config = input.config.expect("checked above");
-        config.merge_redacted_from(&existing.config);
-        config.validate().map_err(ApiError::validation)?;
-        config
-            .validate_network_targets()
-            .await
-            .map_err(ApiError::validation)?;
-        (config, Vec::new())
-    };
+    let mut config = input.config;
+    config.merge_redacted_from(&existing.config);
+    config.validate().map_err(ApiError::validation)?;
+    config
+        .validate_network_targets()
+        .await
+        .map_err(ApiError::validation)?;
     let mut settings = GlobalNotificationSettings {
         confirmed: true,
         config,
-        candidates: Vec::new(),
         updated_at: Utc::now(),
     };
     state.store.save_notification_settings(&settings).await?;
     redact_notification_settings(&mut settings);
-    Ok(Json(NotificationUpdateResponse {
-        settings,
-        migration_warnings,
-    }))
+    Ok(Json(NotificationUpdateResponse { settings }))
 }
 
 async fn test_notification(
     State(state): State<AppState>,
     Json(input): Json<NotificationTestInput>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    if !matches!(input.channel.as_str(), "ping" | "mail" | "serverchan") {
-        return Err(ApiError::validation("unknown notification channel".into()));
-    }
     let existing = state.store.notification_settings().await?;
     let mut config = input.config.unwrap_or_else(|| existing.config.clone());
     config.merge_redacted_from(&existing.config);
@@ -650,7 +660,7 @@ async fn test_notification(
         .map_err(ApiError::validation)?;
     state
         .runner
-        .test_notification(&config, &input.channel)
+        .test_notification(&config, &input.target_id)
         .await
         .map_err(|_| ApiError::validation("notification test failed".into()))?;
     Ok(Json(json!({ "ok": true })))
@@ -665,12 +675,50 @@ fn redact_plan(plan: &mut Plan) {
 
 fn redact_notification_settings(settings: &mut GlobalNotificationSettings) {
     redact_notification_config(&mut settings.config);
-    for candidate in &mut settings.candidates {
-        redact_notification_config(&mut candidate.config);
-    }
 }
 
 fn redact_notification_config(config: &mut NotificationConfig) {
+    for target in &mut config.targets {
+        match &mut target.kind {
+            NotificationTargetKind::ServerChan { config } => {
+                if !config.send_key.is_empty() {
+                    config.send_key = REDACTED.into();
+                }
+            }
+            NotificationTargetKind::Email { config } => {
+                if !config.smtp_options.is_empty() {
+                    config.smtp_options = vec![REDACTED.into()];
+                }
+            }
+            NotificationTargetKind::Ntfy { config } => {
+                if !config.token.is_empty() {
+                    config.token = REDACTED.into();
+                }
+            }
+            NotificationTargetKind::Ping { config } => {
+                for url in [
+                    &mut config.completion_url,
+                    &mut config.start_url,
+                    &mut config.success_url,
+                    &mut config.failure_url,
+                ] {
+                    if !url.is_empty() {
+                        *url = REDACTED.into();
+                    }
+                }
+                for options in [
+                    &mut config.completion_options,
+                    &mut config.start_options,
+                    &mut config.success_options,
+                    &mut config.failure_options,
+                ] {
+                    if !options.is_empty() {
+                        *options = vec![REDACTED.into()];
+                    }
+                }
+            }
+        }
+    }
     for url in [
         &mut config.ping.completion_url,
         &mut config.ping.start_url,
@@ -756,6 +804,12 @@ impl ApiError {
             message: message.into(),
         }
     }
+    fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
+        }
+    }
 }
 impl<E> From<E> for ApiError
 where
@@ -778,13 +832,12 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        FRONTEND_ROUTES, NotificationUpdateResponse, redact_notification_config,
-        remote_needs_input, same_origin_or_non_browser,
-    };
-    use crate::model::{
-        GlobalNotificationSettings, NotificationConfig, NotificationMigrationWarning, REDACTED,
+        FRONTEND_ROUTES, NotificationUpdateResponse, archive_password_response,
+        redact_notification_config, remote_needs_input, require_password_reveal_auth,
+        same_origin_or_non_browser,
     };
     use axum::http::{HeaderMap, HeaderValue, header};
+    use rclone_backup_core::{GlobalNotificationSettings, NotificationConfig, REDACTED};
     use serde_json::json;
 
     #[test]
@@ -810,8 +863,8 @@ mod tests {
         let html = super::render_index_html("Backup");
         let version = env!("CARGO_PKG_VERSION");
 
-        assert!(html.contains(&format!("/app.css?v={version}")));
-        assert!(html.contains(&format!("/app.js?v={version}")));
+        assert!(html.contains(&format!("/app.css?v={version}-2")));
+        assert!(html.contains(&format!("/app.js?v={version}-2")));
         assert!(!html.contains("{{ASSET_VERSION}}"));
     }
 
@@ -844,6 +897,29 @@ mod tests {
     }
 
     #[test]
+    fn archive_password_reveal_requires_web_authentication() {
+        let error = require_password_reveal_auth(false).unwrap_err();
+        assert_eq!(error.status, axum::http::StatusCode::FORBIDDEN);
+        assert!(require_password_reveal_auth(true).is_ok());
+    }
+
+    #[tokio::test]
+    async fn archive_password_response_is_never_cacheable() {
+        let response = archive_password_response("recovery-secret");
+        assert_eq!(
+            response.headers()[axum::http::header::CACHE_CONTROL],
+            "no-store"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({ "password": "recovery-secret" })
+        );
+    }
+
+    #[test]
     fn notification_secrets_are_masked_and_redacted_values_merge() {
         let mut stored = NotificationConfig::default();
         stored.ping.enabled = true;
@@ -870,22 +946,13 @@ mod tests {
     }
 
     #[test]
-    fn notification_update_response_includes_structured_migration_warnings() {
+    fn notification_update_response_contains_the_saved_settings() {
         let response = NotificationUpdateResponse {
             settings: GlobalNotificationSettings::default(),
-            migration_warnings: vec![NotificationMigrationWarning {
-                channel: "mail".into(),
-                reason: "SMTP variable is not allowed".into(),
-            }],
         };
 
         let value = serde_json::to_value(response).unwrap();
 
-        assert_eq!(value["migration_warnings"][0]["channel"], "mail");
-        assert_eq!(
-            value["migration_warnings"][0]["reason"],
-            "SMTP variable is not allowed"
-        );
         assert!(value.get("config").is_some());
     }
 }

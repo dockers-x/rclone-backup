@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>{{SITE_NAME}}</title>
-  <link rel="stylesheet" href="/app.css?v={{ASSET_VERSION}}">
+  <link rel="stylesheet" href="/app.css?v={{ASSET_VERSION}}-2">
 </head>
 <body>
   <a class="skip-link" href="#main" data-i18n="skip">跳到主要内容</a>
@@ -26,6 +26,8 @@
     <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7M10 20h4"/></symbol>
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -92,40 +94,12 @@
           <section class="section-block" id="notifications">
             <div class="section-heading"><div><p class="eyebrow" data-i18n="globalSettings">全局设置</p><h2 data-i18n="notifications">通知配置</h2></div><span class="badge disabled" id="notificationState" data-i18n="notConfigured">未配置</span></div>
             <p class="section-copy" data-i18n="globalNotificationHint">所有手动与定时备份共用这一套通知配置。</p>
-            <div class="migration-notice" id="notificationConflict" role="status" hidden></div>
-            <div class="candidate-feedback" id="notificationCandidateStatus" role="status" hidden></div>
-            <div class="form-error candidate-error" id="notificationCandidateError" role="alert" hidden></div>
             <form id="notificationForm" class="notification-panel">
-            <div class="form-error" id="notificationError" role="alert" hidden></div>
-            <article class="channel-card">
-              <header><div class="channel-icon"><svg><use href="#i-globe"/></svg></div><div><h3>Ping</h3><p data-i18n="pingHint">向健康检查或 Webhook URL 报告备份事件</p></div><label class="compact-switch"><input type="checkbox" name="ping_enabled"><i></i><span class="sr-only" data-i18n="enablePing">启用 Ping</span></label></header>
-              <div class="channel-body form-grid">
-                <label class="field span-2"><span data-i18n="completionUrl">完成 URL（成功或失败）</span><input name="ping_completion" type="password" autocomplete="new-password" placeholder="https://hc-ping.com/..."></label>
-                <label class="field"><span data-i18n="startUrl">开始 URL</span><input name="ping_start" type="password" autocomplete="new-password"></label>
-                <label class="field"><span data-i18n="successUrl">成功 URL</span><input name="ping_success" type="password" autocomplete="new-password"></label>
-                <label class="field span-2"><span data-i18n="failureUrl">失败 URL</span><input name="ping_failure" type="password" autocomplete="new-password"></label>
-                <div class="event-options span-2" role="group" aria-label="Ping events"><label><input type="checkbox" name="ping_on_start"><span data-i18n="onStart">开始</span></label><label><input type="checkbox" name="ping_on_success"><span data-i18n="onSuccess">成功</span></label><label><input type="checkbox" name="ping_on_failure"><span data-i18n="onFailure">失败</span></label></div>
-              </div>
-              <footer><button class="button ghost" type="button" data-action="test-notification" data-channel="ping"><span data-i18n="sendTest">发送测试</span></button></footer>
-            </article>
-            <article class="channel-card">
-              <header><div class="channel-icon"><svg><use href="#i-bell"/></svg></div><div><h3>SMTP</h3><p data-i18n="smtpGlobalHint">通过 SMTP 向指定收件人发送邮件</p></div><label class="compact-switch"><input type="checkbox" name="mail_enabled"><i></i><span class="sr-only" data-i18n="enableSmtp">启用 SMTP</span></label></header>
-              <div class="channel-body form-grid">
-                <label class="field"><span data-i18n="recipient">收件人</span><input name="mail_to" type="email" autocomplete="email"></label>
-                <label class="field"><span data-i18n="smtpOptions">SMTP 参数</span><input name="mail_options" autocomplete="off" placeholder="-S mta=smtps://smtp.example.com -S from=backup@example.com"></label>
-                <div class="event-options span-2" role="group" aria-label="SMTP events"><label><input type="checkbox" name="mail_on_start"><span data-i18n="onStart">开始</span></label><label><input type="checkbox" name="mail_on_success"><span data-i18n="onSuccess">成功</span></label><label><input type="checkbox" name="mail_on_failure"><span data-i18n="onFailure">失败</span></label></div>
-              </div>
-              <footer><button class="button ghost" type="button" data-action="test-notification" data-channel="mail"><span data-i18n="sendTest">发送测试</span></button></footer>
-            </article>
-            <article class="channel-card">
-              <header><div class="channel-icon"><svg><use href="#i-bell"/></svg></div><div><h3>ServerChan</h3><p data-i18n="serverChanHint">通过 SendKey 推送运行状态</p></div><label class="compact-switch"><input type="checkbox" name="server_enabled"><i></i><span class="sr-only" data-i18n="enableServerChan">启用 ServerChan</span></label></header>
-              <div class="channel-body form-grid">
-                <label class="field span-2"><span>SendKey</span><input name="server_key" type="password" autocomplete="new-password"></label>
-                <div class="event-options span-2" role="group" aria-label="ServerChan events"><label><input type="checkbox" name="server_on_start"><span data-i18n="onStart">开始</span></label><label><input type="checkbox" name="server_on_success"><span data-i18n="onSuccess">成功</span></label><label><input type="checkbox" name="server_on_failure"><span data-i18n="onFailure">失败</span></label></div>
-              </div>
-              <footer><button class="button ghost" type="button" data-action="test-notification" data-channel="serverchan"><span data-i18n="sendTest">发送测试</span></button></footer>
-            </article>
-            <div class="notification-actions"><p id="notificationSavedAt" aria-live="polite"></p><button class="button primary" id="saveNotificationsButton" type="submit" data-i18n="saveNotifications">保存通知配置</button></div>
+              <div class="form-error" id="notificationError" role="alert" hidden></div>
+              <div class="notification-toolbar"><span id="notificationCount">0 / 32</span><label class="field inline-select"><span class="sr-only" data-i18n="notificationType">通知类型</span><select id="notificationType"><option value="ping">Ping</option><option value="email">Email</option><option value="serverchan-app" data-i18n="serverChanApp">Server酱 App 推送</option><option value="serverchan-wechat" data-i18n="serverChanWechat">Server酱微信推送</option><option value="ntfy">ntfy</option></select></label><button class="button ghost" type="button" data-action="add-notification"><svg><use href="#i-plus"/></svg><span data-i18n="addNotification">添加目标</span></button></div>
+              <ul class="notification-list" id="notificationList" aria-label="通知目标"></ul>
+              <div class="empty-state notification-empty" id="emptyNotifications" hidden><h3 data-i18n="noNotificationTargets">还没有通知目标</h3><p data-i18n="noNotificationTargetsHint">添加 Ping、Email、Server酱或 ntfy；同一类型可以添加多个。</p></div>
+              <div class="notification-actions"><p id="notificationSavedAt" aria-live="polite"></p><button class="button primary" id="saveNotificationsButton" type="submit" data-i18n="saveNotifications">保存通知配置</button></div>
             </form>
           </section>
         </div>
@@ -144,7 +118,7 @@
 
   <dialog class="plan-dialog" id="planDialog" aria-labelledby="dialogTitle">
     <form id="planForm" method="dialog">
-      <header class="dialog-header"><div><p class="eyebrow" data-i18n="configuration">配置</p><h2 id="dialogTitle" data-i18n="newPlan">新建方案</h2></div><button class="icon-button" type="button" data-action="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
+      <header class="dialog-header"><div><p class="eyebrow" data-i18n="configuration">配置</p><h2 id="dialogTitle">新建方案</h2></div><button class="icon-button" type="button" data-action="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
       <div class="dialog-body">
         <div class="form-error" id="formError" role="alert" hidden></div>
         <section class="form-section"><div class="form-section-title"><span>01</span><div><h3 data-i18n="basics">基础设置</h3><p data-i18n="basicsHint">名称、运行状态与定时规则</p></div></div>
@@ -179,15 +153,22 @@
         <details class="form-section disclosure" open><summary><div class="form-section-title"><span>03</span><div><h3 data-i18n="archiveEncryption">归档与加密</h3><p data-i18n="archiveEncryptionHint">生成可直接下载和解压恢复的标准归档</p></div></div><svg><use href="#i-chevron"/></svg></summary>
           <div class="form-grid details-content">
             <label class="field"><span data-i18n="archiveType">归档格式</span><select name="archive_kind"><option value="7z" data-i18n="secureArchive">7z · 安全优先（推荐）</option><option value="zip" data-i18n="compatibleArchive">ZIP · 兼容优先</option><option value="none" data-i18n="nativeDirectory">原生目录 · 依赖 rclone 恢复</option></select></label>
-            <label class="field"><span data-i18n="archivePassword">归档密码（可选）</span><span class="password-field"><input name="archive_password" type="password" autocomplete="new-password"><button type="button" class="password-toggle" data-action="toggle-password" aria-label="显示密码" aria-pressed="false"><svg><use href="#i-eye"/></svg></button></span><small id="archiveSecurityHint" data-i18n="secureArchiveHint">设置后使用 AES-256 并加密文件名，常见 7z 软件可直接恢复。</small></label>
+            <label class="field"><span data-i18n="archivePassword">归档密码（可选）</span><span class="password-field"><input name="archive_password" type="password" autocomplete="new-password"><button type="button" class="password-toggle" data-action="toggle-password" aria-label="显示密码" aria-pressed="false" disabled><svg><use href="#i-eye"/></svg></button></span><small id="archiveSecurityHint" data-i18n="secureArchiveHint">设置后使用 AES-256 并加密文件名，常见 7z 软件可直接恢复。</small></label>
+            <label class="field"><span data-i18n="passwordHint">密码提示（可选）</span><input name="archive_password_hint" maxlength="160" autocomplete="off" placeholder="例如：2026 NAS 主密码"><small data-i18n="passwordHintHelp">用于帮助回忆，请勿填写密码本身</small></label>
             <label class="field"><span data-i18n="fileSuffix">文件名时间格式</span><input name="archive_suffix" value="%Y%m%d-%H%M%S" required></label>
           </div>
         </details>
 
         <details class="form-section disclosure" open><summary><div class="form-section-title"><span>04</span><div><h3 data-i18n="backupRetentionPolicy">备份保留策略</h3><p data-i18n="backupRetentionHint">按时间或数量自动清理旧备份，可独立启用</p></div></div><svg><use href="#i-chevron"/></svg></summary>
-          <div class="form-grid details-content retention-grid">
-            <label class="retention-option"><span><input name="keep_days_enabled" type="checkbox"><strong data-i18n="keepDays">保留天数</strong></span><input name="keep_days" type="number" min="1" max="36500" value="30" disabled required><small data-i18n="keepDaysHint">删除超过指定天数的备份</small></label>
-            <label class="retention-option"><span><input name="keep_count_enabled" type="checkbox"><strong data-i18n="keepCount">保留份数</strong></span><input name="keep_count" type="number" min="1" max="100000" value="10" disabled required><small data-i18n="keepCountHint">仅保留最新的指定份数</small></label>
+          <div class="details-content retention-list">
+            <div class="retention-row">
+              <label class="retention-toggle"><input id="keepDaysEnabled" name="keep_days_enabled" type="checkbox"><span><strong data-i18n="keepDays">保留天数</strong><small data-i18n="keepDaysHint">删除超过指定天数的备份</small></span></label>
+              <label class="retention-value" for="keepDays"><span class="sr-only" data-i18n="keepDays">保留天数</span><input id="keepDays" name="keep_days" type="number" min="1" max="36500" value="30" disabled required><b data-i18n="daysUnit">天</b></label>
+            </div>
+            <div class="retention-row">
+              <label class="retention-toggle"><input id="keepCountEnabled" name="keep_count_enabled" type="checkbox"><span><strong data-i18n="keepCount">保留份数</strong><small data-i18n="keepCountHint">仅保留最新的指定份数</small></span></label>
+              <label class="retention-value" for="keepCount"><span class="sr-only" data-i18n="keepCount">保留份数</span><input id="keepCount" name="keep_count" type="number" min="1" max="100000" value="10" disabled required><b data-i18n="copiesUnit">份</b></label>
+            </div>
           </div>
         </details>
 
@@ -230,6 +211,6 @@
 
   <template id="sourceTemplate"><div class="repeat-row source-row"><label class="field"><span data-i18n="label">名称</span><input data-field="name" required maxlength="80" placeholder="data"></label><label class="field grow"><span data-i18n="path">绝对路径</span><input data-field="path" required placeholder="/data"></label><button type="button" class="icon-button danger" data-action="remove-row" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
   <template id="remoteTemplate"><div class="repeat-row remote-row"><label class="field"><span data-i18n="remoteName">Rclone 远端名</span><select data-field="name" required><option value="">—</option></select></label><label class="field grow"><span data-i18n="remoteDir">远端目录</span><input data-field="directory" required placeholder="/RcloneBackup/"></label><button type="button" class="icon-button danger" data-action="remove-row" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
-  <script src="/app.js?v={{ASSET_VERSION}}" defer></script>
+  <script src="/app.js?v={{ASSET_VERSION}}-2" defer></script>
 </body>
 </html>

@@ -1,0 +1,22 @@
+[package]
+name = "rclone-backup-runner"
+version = "2.0.4"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+rclone-backup-core = { path = "../core" }
+rclone-backup-notifications = { path = "../notifications" }
+rclone-backup-rclone = { path = "../rclone" }
+rclone-backup-store = { path = "../store" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.47", features = ["fs", "io-util", "process", "sync", "time"] }
+tracing = "0.1"
+url = "2.5"
+uuid = { version = "1.18", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tempfile = "3.20"

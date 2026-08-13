@@ -1,6 +1,8 @@
-use crate::{model::*, rc::RcloneRc, store::Store};
 use anyhow::{Context, anyhow, bail};
 use chrono::Local;
+use rclone_backup_core::*;
+use rclone_backup_rclone::RcloneRc;
+use rclone_backup_store::Store;
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -112,7 +114,7 @@ impl Runner {
     pub async fn test_notification(
         &self,
         config: &NotificationConfig,
-        channel: &str,
+        target_id: &str,
     ) -> anyhow::Result<()> {
         let existing = self
             .store
@@ -126,8 +128,27 @@ impl Runner {
             .validate_network_targets()
             .await
             .map_err(anyhow::Error::msg)?;
+        if let Some(target) = config.targets.iter().find(|target| target.id == target_id) {
+            let mut target = target.clone();
+            target.enabled = true;
+            target.on_success = true;
+            let mut test = NotificationConfig::default();
+            test.targets.push(target);
+            test.validate().map_err(anyhow::Error::msg)?;
+            let report = rclone_backup_notifications::deliver(
+                "Rclone Backup Test",
+                &test,
+                "success",
+                "Notification test from Rclone Backup",
+            )
+            .await;
+            if report.failed {
+                bail!("notification delivery failed; check the server log and configuration");
+            }
+            return Ok(());
+        }
         let mut test = NotificationConfig::default();
-        let event = match channel {
+        let event = match target_id {
             "ping" => {
                 test.ping = config.ping.clone();
                 test.ping.enabled = true;
@@ -156,7 +177,7 @@ impl Runner {
                 test.serverchan.on_success = true;
                 "success"
             }
-            _ => bail!("notification channel must be ping, mail, or serverchan"),
+            _ => bail!("notification target was not found"),
         };
         test.validate().map_err(anyhow::Error::msg)?;
         let mut log = LogBuffer::notification_test(&test);
@@ -749,10 +770,6 @@ impl CommandSpec {
         self.stdin = Some(format!("{value}\n{value}\n"));
         self.secret(value)
     }
-    fn stdin(mut self, value: String) -> Self {
-        self.stdin = Some(value);
-        self
-    }
     fn secret(mut self, value: &str) -> Self {
         if !value.is_empty() {
             self.secrets.push(value.into());
@@ -816,246 +833,11 @@ async fn send_notification(
     content: &str,
     log: &mut LogBuffer,
 ) {
-    let subject = format!(
-        "{} Backup {}",
-        plan_name,
-        match event {
-            "start" => "Start",
-            "success" => "Success",
-            _ => "Failed",
-        }
-    );
-    let ping = &notifications.ping;
-    let mut endpoints = vec![];
-    if ping.enabled && event == "start" && ping.on_start {
-        endpoints.push((&ping.start_url, &ping.start_options));
+    let report =
+        rclone_backup_notifications::deliver(plan_name, notifications, event, content).await;
+    for message in report.messages {
+        log.line(message);
     }
-    if ping.enabled && event == "success" && ping.on_success {
-        endpoints.push((&ping.success_url, &ping.success_options));
-    }
-    if ping.enabled && event == "failure" && ping.on_failure {
-        endpoints.push((&ping.failure_url, &ping.failure_options));
-    }
-    if ping.enabled
-        && event != "start"
-        && ((event == "success" && ping.on_success) || (event == "failure" && ping.on_failure))
-    {
-        endpoints.push((&ping.completion_url, &ping.completion_options));
-    }
-    for (url, options) in endpoints {
-        if url.is_empty() {
-            continue;
-        }
-        let url = url
-            .replace("%{subject}", &urlencoding(&subject))
-            .replace("%{content}", &urlencoding(content));
-        let args: Vec<_> = options
-            .iter()
-            .map(|v| {
-                v.replace("%{subject}", &subject)
-                    .replace("%{content}", content)
-            })
-            .collect();
-        let mut command = match pinned_curl_command(&url, "Ping").await {
-            Ok(command) => command,
-            Err(error) => {
-                log.line(format!("Ping notification warning: {error}"));
-                continue;
-            }
-        }
-        .args([
-            "--noproxy",
-            "*",
-            "-m",
-            "15",
-            "-f",
-            "--retry",
-            "3",
-            "--retry-delay",
-            "1",
-            "-o",
-            "/dev/null",
-            "-s",
-        ]);
-        for argument in args {
-            command = command.arg(&argument).secret(&argument);
-        }
-        command = command.arg(&url).secret(&url);
-        if let Err(error) = run_command(command, log).await {
-            log.line(format!("Ping notification warning: {error}"));
-        }
-    }
-    let mail = &notifications.mail;
-    if mail.enabled
-        && !mail.to.is_empty()
-        && ((event == "start" && mail.on_start)
-            || (event == "success" && mail.on_success)
-            || (event == "failure" && mail.on_failure))
-    {
-        match mail_command(mail, &subject, content).await {
-            Ok(command) => match run_command(command, log).await {
-                Ok(_) => log.line("Mail notification sent."),
-                Err(error) => log.line(format!("Mail notification warning: {error}")),
-            },
-            Err(error) => log.line(format!("Mail notification warning: {error}")),
-        }
-    }
-    let server = &notifications.serverchan;
-    if server.enabled
-        && !server.send_key.is_empty()
-        && ((event == "start" && server.on_start)
-            || (event == "success" && server.on_success)
-            || (event == "failure" && server.on_failure))
-    {
-        let url = if let Some(rest) = server.send_key.strip_prefix("sctp") {
-            let number: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            format!(
-                "https://{number}.push.ft07.com/send/{}.send",
-                server.send_key
-            )
-        } else {
-            format!("https://sctapi.ftqq.com/{}.send", server.send_key)
-        };
-        let command = match pinned_curl_command(&url, "ServerChan").await {
-            Ok(command) => command,
-            Err(error) => {
-                log.line(format!("ServerChan warning: {error}"));
-                return;
-            }
-        }
-        .args([
-            "--noproxy",
-            "*",
-            "-m",
-            "15",
-            "-f",
-            "--retry",
-            "3",
-            "-s",
-            "-o",
-            "/dev/null",
-            "-X",
-            "POST",
-            "--data-urlencode",
-            &format!("text={subject}"),
-            "--data-urlencode",
-            &format!("desp={content}"),
-        ])
-        .arg(&url)
-        .secret(&server.send_key);
-        if let Err(error) = run_command(command, log).await {
-            log.line(format!("ServerChan warning: {error}"));
-        }
-    }
-}
-
-async fn pinned_curl_command(url: &str, channel: &str) -> Result<CommandSpec, String> {
-    let target = resolve_public_url(url, channel).await?;
-    let scheme = url::Url::parse(url)
-        .map(|url| url.scheme().to_owned())
-        .map_err(|_| format!("{channel} URL is invalid"))?;
-    if !matches!(scheme.as_str(), "http" | "https" | "smtp" | "smtps") {
-        return Err(format!("{channel} URL scheme is not supported"));
-    }
-    Ok(pinned_curl_command_for_target(&target, &scheme))
-}
-
-fn pinned_curl_command_for_target(target: &ResolvedTarget, scheme: &str) -> CommandSpec {
-    let addresses = target
-        .addresses
-        .iter()
-        .map(|address| match address {
-            std::net::IpAddr::V4(address) => address.to_string(),
-            std::net::IpAddr::V6(address) => format!("[{address}]"),
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    CommandSpec::new("curl")
-        .args([
-            "--resolve",
-            &format!("{}:{}:{addresses}", target.host, target.port),
-        ])
-        .arg("--proto")
-        .arg(format!("={scheme}"))
-}
-
-async fn mail_command(
-    mail: &MailConfig,
-    subject: &str,
-    content: &str,
-) -> Result<CommandSpec, String> {
-    let options = mail_options(&mail.smtp_options)?;
-    let mut command = pinned_curl_command(&options.server, "SMTP")
-        .await?
-        .args([
-            "--noproxy",
-            "*",
-            "--connect-timeout",
-            "15",
-            "--max-time",
-            "30",
-            "--fail",
-        ])
-        .arg("--mail-from")
-        .arg(&options.from)
-        .arg("--mail-rcpt")
-        .arg(&mail.to)
-        .arg("--upload-file")
-        .arg("-")
-        .stdin(format!(
-            "To: {}\r\nFrom: {}\r\nSubject: {}\r\n\r\n{}\r\n",
-            mail.to, options.from, subject, content
-        ));
-    command = command.arg("--ssl-reqd");
-    if let Some(credentials) = options.credentials {
-        command = command.arg("--user").arg(&credentials).secret(&credentials);
-    }
-    Ok(command.arg(&options.server).secret(&options.server))
-}
-
-struct MailOptions {
-    server: String,
-    from: String,
-    credentials: Option<String>,
-}
-
-fn mail_options(options: &[String]) -> Result<MailOptions, String> {
-    let mut values = HashMap::new();
-    let mut index = 0;
-    while index < options.len() {
-        let value = if options[index] == "-S" {
-            index += 1;
-            options.get(index).map(String::as_str)
-        } else {
-            options[index].strip_prefix("-S")
-        }
-        .ok_or_else(|| "SMTP option is missing its value".to_owned())?;
-        let (name, value) = value
-            .split_once('=')
-            .ok_or_else(|| "SMTP variable must use name=value".to_owned())?;
-        values.insert(name, value.to_owned());
-        index += 1;
-    }
-    let server = values
-        .remove("mta")
-        .or_else(|| values.remove("smtp"))
-        .ok_or_else(|| "SMTP server is required".to_owned())?;
-    let from = values
-        .remove("from")
-        .ok_or_else(|| "SMTP from address is required".to_owned())?;
-    let credentials = match (
-        values.remove("smtp-auth-user"),
-        values.remove("smtp-auth-password"),
-    ) {
-        (Some(user), Some(password)) => Some(format!("{user}:{password}")),
-        (None, None) => None,
-        _ => return Err("SMTP user and password must be configured together".into()),
-    };
-    Ok(MailOptions {
-        server,
-        from,
-        credentials,
-    })
 }
 
 async fn notify(
@@ -1068,7 +850,7 @@ async fn notify(
     send_notification(&plan.name, notifications, event, content, log).await;
 }
 
-pub(crate) fn safe_name(value: &str) -> String {
+fn safe_name(value: &str) -> String {
     let value: String = value
         .chars()
         .map(|c| {
@@ -1093,9 +875,6 @@ fn redact(value: &str, secrets: &[String]) -> String {
         .fold(value.to_owned(), |out, secret| {
             out.replace(secret, REDACTED)
         })
-}
-fn urlencoding(value: &str) -> String {
-    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
 struct LogBuffer {
@@ -1139,6 +918,35 @@ impl LogBuffer {
                 .filter(|secret| !secret.is_empty())
         }));
         secrets.push(notifications.mail.to.clone());
+        for target in &notifications.targets {
+            match &target.kind {
+                NotificationTargetKind::Ping { config } => {
+                    secrets.extend([
+                        config.completion_url.clone(),
+                        config.start_url.clone(),
+                        config.success_url.clone(),
+                        config.failure_url.clone(),
+                    ]);
+                    secrets.extend(
+                        config
+                            .completion_options
+                            .iter()
+                            .chain(&config.start_options)
+                            .chain(&config.success_options)
+                            .chain(&config.failure_options)
+                            .cloned(),
+                    );
+                }
+                NotificationTargetKind::Email { config } => {
+                    secrets.extend(config.smtp_options.iter().cloned());
+                    secrets.push(config.to.clone());
+                }
+                NotificationTargetKind::ServerChan { config } => {
+                    secrets.push(config.send_key.clone())
+                }
+                NotificationTargetKind::Ntfy { config } => secrets.push(config.token.clone()),
+            }
+        }
         Self {
             text: String::new(),
             secrets,
@@ -1216,13 +1024,6 @@ impl LogBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn curl_resolve_argument(command: &CommandSpec) -> Option<&str> {
-        command
-            .args
-            .windows(2)
-            .find(|arguments| arguments[0] == "--resolve")
-            .map(|arguments| arguments[1].as_str())
-    }
     #[test]
     fn names_and_secrets_are_safe() {
         assert_eq!(safe_name("My Files / 1"), "my-files---1");
@@ -1290,43 +1091,6 @@ mod tests {
         log.line("mta=smtps://alice:hunter2@smtp.example");
         assert!(!log.text.contains("private-token"));
         assert!(!log.text.contains("hunter2"));
-    }
-
-    #[test]
-    fn notification_curl_is_pinned_to_the_validated_addresses() {
-        let target = ResolvedTarget {
-            host: "notify.example".into(),
-            port: 443,
-            addresses: vec![
-                "8.8.8.8".parse().unwrap(),
-                "2606:4700:4700::1111".parse().unwrap(),
-            ],
-        };
-        let command = pinned_curl_command_for_target(&target, "https");
-        assert_eq!(
-            curl_resolve_argument(&command),
-            Some("notify.example:443:8.8.8.8,[2606:4700:4700::1111]")
-        );
-        assert!(!command.args.iter().any(|arg| arg == "--location"));
-        assert_eq!(
-            command.args.windows(2).find(|args| args[0] == "--proto"),
-            Some(&["--proto".into(), "=https".into()][..])
-        );
-    }
-
-    #[test]
-    fn notification_curl_never_performs_an_unpinned_lookup() {
-        let target = ResolvedTarget {
-            host: "notify.example".into(),
-            port: 443,
-            addresses: vec!["8.8.8.8".parse().unwrap()],
-        };
-        let command = pinned_curl_command_for_target(&target, "https");
-        assert_eq!(
-            curl_resolve_argument(&command),
-            Some("notify.example:443:8.8.8.8")
-        );
-        assert!(!command.args.iter().any(|argument| argument == "127.0.0.1"));
     }
 
     #[tokio::test]

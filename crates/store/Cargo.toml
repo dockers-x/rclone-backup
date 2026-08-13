@@ -1,0 +1,22 @@
+[package]
+name = "rclone-backup-store"
+version = "2.0.4"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+aes-gcm = "0.10"
+anyhow = "1.0"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.9"
+rclone-backup-core = { path = "../core" }
+rustix = { version = "1.1", features = ["process"] }
+serde = "1.0"
+serde_json = "1.0"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.18", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tempfile = "3.20"

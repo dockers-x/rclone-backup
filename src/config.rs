@@ -190,6 +190,7 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
                 "none".into()
             },
             password: nonempty(get("ZIP_PASSWORD"), "123456"),
+            password_hint: String::new(),
             suffix,
         },
         remotes,
@@ -199,6 +200,7 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
         },
         retry: RetryPolicy::default(),
         notifications: NotificationConfig {
+            targets: Vec::new(),
             ping: PingConfig {
                 enabled: false,
                 on_start: true,
@@ -224,6 +226,7 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
             serverchan: ServerChanConfig {
                 enabled: bool_or(&get("SERVERCHAN_ENABLE"), false),
                 send_key: get("SERVERCHAN_SENDKEY"),
+                channel: "wechat".into(),
                 on_start: bool_or(&get("SERVERCHAN_WHEN_START"), true),
                 on_success: bool_or(&get("SERVERCHAN_WHEN_SUCCESS"), true),
                 on_failure: bool_or(&get("SERVERCHAN_WHEN_FAILURE"), true),
@@ -236,6 +239,8 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
         tracing::warn!(%reason, "legacy SMTP configuration was disabled during migration");
         input.notifications.mail = MailConfig::default();
     }
+    input.notifications.normalize_legacy();
+    input.notifications.promote_legacy_targets();
     input
 }
 
@@ -445,8 +450,11 @@ mod tests {
         ]);
         let input = legacy_plan_input(&dotenv);
 
+        let NotificationTargetKind::Email { config } = &input.notifications.targets[0].kind else {
+            panic!("legacy mail must become an Email target");
+        };
         assert_eq!(
-            input.notifications.mail.smtp_options,
+            config.smtp_options,
             [
                 "-S",
                 "mta=smtp://smtp.example:587",
@@ -459,5 +467,37 @@ mod tests {
             ]
         );
         assert!(input.validate().is_ok());
+    }
+
+    #[test]
+    fn first_environment_import_creates_one_record_for_each_notification_type() {
+        let dotenv = HashMap::from([
+            ("PING_URL_WHEN_SUCCESS".into(), "https://8.8.8.8/ok".into()),
+            ("MAIL_SMTP_ENABLE".into(), "true".into()),
+            ("MAIL_TO".into(), "receiver@example.com".into()),
+            (
+                "MAIL_SMTP_VARIABLES".into(),
+                "-S mta=smtps://smtp.example -S from=sender@example.com".into(),
+            ),
+            ("SERVERCHAN_ENABLE".into(), "true".into()),
+            ("SERVERCHAN_SENDKEY".into(), "SCTexample".into()),
+        ]);
+        let input = legacy_plan_input(&dotenv);
+        assert_eq!(input.notifications.targets.len(), 3);
+        assert!(matches!(
+            input.notifications.targets[0].kind,
+            NotificationTargetKind::Ping { .. }
+        ));
+        assert!(matches!(
+            input.notifications.targets[1].kind,
+            NotificationTargetKind::Email { .. }
+        ));
+        assert!(matches!(
+            input.notifications.targets[2].kind,
+            NotificationTargetKind::ServerChan { .. }
+        ));
+        assert!(input.notifications.ping == PingConfig::default());
+        assert!(input.notifications.mail == MailConfig::default());
+        assert!(input.notifications.serverchan == ServerChanConfig::default());
     }
 }

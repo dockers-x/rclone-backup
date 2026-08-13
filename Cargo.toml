@@ -1,38 +1,40 @@
 [package]
 name = "rclone-backup"
-version = "2.0.3"
+version = "2.0.4"
 edition = "2024"
 license = "MIT"
 description = "Rclone-powered backup orchestrator with a bilingual Web UI"
 repository = "https://github.com/dockers-x/rclone-backup"
 
+[workspace]
+members = [
+    ".",
+    "crates/api",
+    "crates/core",
+    "crates/notifications",
+    "crates/rclone",
+    "crates/runner",
+    "crates/store",
+]
+resolver = "3"
+
 [dependencies]
 anyhow = "1.0"
-aes-gcm = "0.10"
 axum = { version = "0.8", features = ["macros"] }
-base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.10"
-cron = "0.15"
-rustix = { version = "1.1", features = ["process"] }
-rand = "0.9"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-serde = { version = "1.0", features = ["derive"] }
+rclone-backup-api = { path = "crates/api" }
+rclone-backup-core = { path = "crates/core" }
+rclone-backup-rclone = { path = "crates/rclone" }
+rclone-backup-runner = { path = "crates/runner" }
+rclone-backup-store = { path = "crates/store" }
 serde_json = "1.0"
 shell-words = "1.1"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
-thiserror = "2.0"
-subtle = "2.6"
 tokio = { version = "1.47", features = ["full"] }
-tower-http = { version = "0.6", features = ["catch-panic", "compression-gzip", "limit", "request-id", "set-header", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-url = "2.5"
 uuid = { version = "1.18", features = ["serde", "v4"] }
 
 [dev-dependencies]
-tempfile = "3.20"
-tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 codegen-units = 1

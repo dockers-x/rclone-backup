@@ -19,6 +19,7 @@ pub struct Plan {
     pub remotes: Vec<RemoteConfig>,
     pub retention: RetentionPolicy,
     pub retry: RetryPolicy,
+    #[serde(default, skip_serializing_if = "NotificationConfig::is_empty")]
     pub notifications: NotificationConfig,
     #[serde(default)]
     pub rclone_flags: Vec<String>,
@@ -47,7 +48,7 @@ pub struct PlanInput {
     pub retention: RetentionPolicy,
     #[serde(default)]
     pub retry: RetryPolicy,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "NotificationConfig::is_empty")]
     pub notifications: NotificationConfig,
     #[serde(default)]
     pub rclone_flags: Vec<String>,
@@ -79,7 +80,7 @@ impl PlanInput {
         }
         let mut archive_names = std::collections::HashSet::new();
         if self.sources.iter().any(|source| {
-            let name = crate::runner::safe_name(&source.name);
+            let name = safe_archive_name(&source.name);
             name.is_empty() || !archive_names.insert(name)
         }) {
             return Err("source names must produce unique archive folder names".into());
@@ -98,6 +99,11 @@ impl PlanInput {
             || self.archive.suffix.chars().count() > 80
         {
             return Err("archive suffix is invalid".into());
+        }
+        if self.archive.password_hint.chars().count() > 160
+            || self.archive.password_hint.contains(['\0', '\r', '\n'])
+        {
+            return Err("archive password hint is invalid".into());
         }
         let mut source_names = std::collections::HashSet::new();
         if self
@@ -193,6 +199,25 @@ fn validate_label(value: &str, field: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn safe_archive_name(value: &str) -> String {
+    let value: String = value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    value
+        .trim_matches('-')
+        .chars()
+        .take(80)
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FolderSource {
     pub name: String,
@@ -204,6 +229,8 @@ pub struct ArchiveConfig {
     pub kind: String,
     #[serde(default)]
     pub password: String,
+    #[serde(default)]
+    pub password_hint: String,
     #[serde(default = "default_suffix")]
     pub suffix: String,
 }
@@ -213,6 +240,7 @@ impl Default for ArchiveConfig {
         Self {
             kind: "7z".into(),
             password: String::new(),
+            password_hint: String::new(),
             suffix: default_suffix(),
         }
     }
@@ -271,17 +299,20 @@ impl RetryPolicy {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct NotificationConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<NotificationTarget>,
+    #[serde(default, skip_serializing_if = "ping_is_default")]
     pub ping: PingConfig,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "mail_is_default")]
     pub mail: MailConfig,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "serverchan_is_default")]
     pub serverchan: ServerChanConfig,
 }
 
 impl NotificationConfig {
     pub fn is_empty(&self) -> bool {
-        !self.ping.has_endpoint()
+        self.targets.is_empty()
+            && !self.ping.has_endpoint()
             && !self.mail.enabled
             && self.mail.to.trim().is_empty()
             && self.mail.smtp_options.is_empty()
@@ -290,6 +321,16 @@ impl NotificationConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self.targets.len() > 32 {
+            return Err("at most 32 notification targets are allowed".into());
+        }
+        let mut ids = std::collections::HashSet::new();
+        for target in &self.targets {
+            target.validate()?;
+            if !ids.insert(target.id.as_str()) {
+                return Err("notification target IDs must be unique".into());
+            }
+        }
         self.ping.validate()?;
         self.validate_mail()?;
         self.validate_serverchan()?;
@@ -319,6 +360,9 @@ impl NotificationConfig {
     }
 
     fn validate_serverchan(&self) -> Result<(), String> {
+        if !matches!(self.serverchan.channel.as_str(), "app" | "wechat") {
+            return Err("ServerChan channel must be app or wechat".into());
+        }
         if self.serverchan.send_key.chars().count() > 256
             || self.serverchan.send_key.contains(['\0', '\r', '\n'])
         {
@@ -384,7 +428,86 @@ impl NotificationConfig {
         }
     }
 
+    pub fn promote_legacy_targets(&mut self) {
+        if !self.targets.is_empty() {
+            return;
+        }
+        if self.ping.has_endpoint() {
+            self.targets.push(NotificationTarget {
+                id: "legacy-ping".into(),
+                name: "Ping".into(),
+                enabled: self.ping.enabled,
+                on_start: self.ping.on_start,
+                on_success: self.ping.on_success,
+                on_failure: self.ping.on_failure,
+                kind: NotificationTargetKind::Ping {
+                    config: PingTargetConfig {
+                        completion_url: self.ping.completion_url.clone(),
+                        completion_options: self.ping.completion_options.clone(),
+                        start_url: self.ping.start_url.clone(),
+                        start_options: self.ping.start_options.clone(),
+                        success_url: self.ping.success_url.clone(),
+                        success_options: self.ping.success_options.clone(),
+                        failure_url: self.ping.failure_url.clone(),
+                        failure_options: self.ping.failure_options.clone(),
+                    },
+                },
+            });
+        }
+        if self.mail.enabled || !self.mail.to.is_empty() || !self.mail.smtp_options.is_empty() {
+            self.targets.push(NotificationTarget {
+                id: "legacy-mail".into(),
+                name: "Email".into(),
+                enabled: self.mail.enabled,
+                on_start: self.mail.on_start,
+                on_success: self.mail.on_success,
+                on_failure: self.mail.on_failure,
+                kind: NotificationTargetKind::Email {
+                    config: MailTargetConfig {
+                        smtp_options: self.mail.smtp_options.clone(),
+                        to: self.mail.to.clone(),
+                    },
+                },
+            });
+        }
+        if self.serverchan.enabled || !self.serverchan.send_key.is_empty() {
+            let name = if self.serverchan.channel == "app" {
+                "Server酱 App 推送"
+            } else {
+                "Server酱微信推送"
+            };
+            self.targets.push(NotificationTarget {
+                id: "legacy-serverchan".into(),
+                name: name.into(),
+                enabled: self.serverchan.enabled,
+                on_start: self.serverchan.on_start,
+                on_success: self.serverchan.on_success,
+                on_failure: self.serverchan.on_failure,
+                kind: NotificationTargetKind::ServerChan {
+                    config: ServerChanTargetConfig {
+                        channel: self.serverchan.channel.parse().unwrap_or_default(),
+                        send_key: self.serverchan.send_key.clone(),
+                    },
+                },
+            });
+        }
+        if !self.targets.is_empty() {
+            self.ping = Default::default();
+            self.mail = Default::default();
+            self.serverchan = Default::default();
+        }
+    }
+
     pub fn merge_redacted_from(&mut self, existing: &Self) {
+        for target in &mut self.targets {
+            if let Some(old) = existing
+                .targets
+                .iter()
+                .find(|old| old.id == target.id && old.kind.same_variant(&target.kind))
+            {
+                target.merge_redacted_from(old);
+            }
+        }
         for (value, old) in [
             (&mut self.ping.completion_url, &existing.ping.completion_url),
             (&mut self.ping.start_url, &existing.ping.start_url),
@@ -444,8 +567,308 @@ impl NotificationConfig {
     }
 
     pub async fn validate_network_targets(&self) -> Result<(), String> {
+        for target in &self.targets {
+            target.validate_network_target().await?;
+        }
         validate_ping_network_targets(&self.ping).await?;
         validate_mail_network_target(&self.mail).await?;
+        Ok(())
+    }
+}
+
+fn ping_is_default(value: &PingConfig) -> bool {
+    value == &PingConfig::default()
+}
+
+fn mail_is_default(value: &MailConfig) -> bool {
+    value == &MailConfig::default()
+}
+
+fn serverchan_is_default(value: &ServerChanConfig) -> bool {
+    value == &ServerChanConfig::default()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NotificationTarget {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub on_start: bool,
+    #[serde(default = "default_true")]
+    pub on_success: bool,
+    #[serde(default = "default_true")]
+    pub on_failure: bool,
+    #[serde(flatten)]
+    pub kind: NotificationTargetKind,
+}
+
+impl NotificationTarget {
+    fn validate(&self) -> Result<(), String> {
+        if self.id.is_empty()
+            || self.id.chars().count() > 80
+            || !self
+                .id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        {
+            return Err("notification target ID is invalid".into());
+        }
+        validate_label(&self.name, "notification target name")?;
+        if self.enabled && !(self.on_start || self.on_success || self.on_failure) {
+            return Err("at least one notification event is required".into());
+        }
+        match &self.kind {
+            NotificationTargetKind::Ping { config } => config.as_legacy(self).validate(),
+            NotificationTargetKind::Email { config } => {
+                let config = config.as_legacy(self);
+                NotificationConfig {
+                    mail: config,
+                    ..Default::default()
+                }
+                .validate_mail()
+            }
+            NotificationTargetKind::ServerChan { config } => config.validate(self.enabled),
+            NotificationTargetKind::Ntfy { config } => config.validate(self.enabled),
+        }
+    }
+
+    async fn validate_network_target(&self) -> Result<(), String> {
+        match &self.kind {
+            NotificationTargetKind::Ping { config } => {
+                validate_ping_network_targets(&config.as_legacy(self)).await
+            }
+            NotificationTargetKind::Email { config } => {
+                validate_mail_network_target(&config.as_legacy(self)).await
+            }
+            NotificationTargetKind::Ntfy { config } => {
+                validate_public_url(&config.server, "ntfy").await
+            }
+            NotificationTargetKind::ServerChan { .. } => Ok(()),
+        }
+    }
+
+    fn merge_redacted_from(&mut self, old: &Self) {
+        match (&mut self.kind, &old.kind) {
+            (
+                NotificationTargetKind::ServerChan { config },
+                NotificationTargetKind::ServerChan { config: old },
+            ) if config.send_key == REDACTED => config.send_key.clone_from(&old.send_key),
+            (
+                NotificationTargetKind::Email { config },
+                NotificationTargetKind::Email { config: old },
+            ) if config.smtp_options.as_slice() == [REDACTED] => {
+                config.smtp_options.clone_from(&old.smtp_options)
+            }
+            (
+                NotificationTargetKind::Ntfy { config },
+                NotificationTargetKind::Ntfy { config: old },
+            ) if config.token == REDACTED => config.token.clone_from(&old.token),
+            (
+                NotificationTargetKind::Ping { config },
+                NotificationTargetKind::Ping { config: old },
+            ) => {
+                for (value, old_value) in [
+                    (&mut config.completion_url, &old.completion_url),
+                    (&mut config.start_url, &old.start_url),
+                    (&mut config.success_url, &old.success_url),
+                    (&mut config.failure_url, &old.failure_url),
+                ] {
+                    if value == REDACTED {
+                        value.clone_from(old_value);
+                    }
+                }
+                for (values, old_values) in [
+                    (&mut config.completion_options, &old.completion_options),
+                    (&mut config.start_options, &old.start_options),
+                    (&mut config.success_options, &old.success_options),
+                    (&mut config.failure_options, &old.failure_options),
+                ] {
+                    if values.as_slice() == [REDACTED] {
+                        values.clone_from(old_values);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn as_notification_config(&self) -> NotificationConfig {
+        let mut config = NotificationConfig::default();
+        match &self.kind {
+            NotificationTargetKind::Ping { config: value } => config.ping = value.as_legacy(self),
+            NotificationTargetKind::Email { config: value } => config.mail = value.as_legacy(self),
+            NotificationTargetKind::ServerChan { config: value } => {
+                config.serverchan = ServerChanConfig {
+                    enabled: self.enabled,
+                    send_key: value.send_key.clone(),
+                    channel: value.channel.to_string(),
+                    on_start: self.on_start,
+                    on_success: self.on_success,
+                    on_failure: self.on_failure,
+                };
+            }
+            NotificationTargetKind::Ntfy { .. } => {}
+        }
+        config
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum NotificationTargetKind {
+    Ping {
+        #[serde(default)]
+        config: PingTargetConfig,
+    },
+    Email {
+        #[serde(default)]
+        config: MailTargetConfig,
+    },
+    #[serde(rename = "serverchan")]
+    ServerChan {
+        #[serde(default)]
+        config: ServerChanTargetConfig,
+    },
+    Ntfy {
+        #[serde(default)]
+        config: NtfyTargetConfig,
+    },
+}
+
+impl NotificationTargetKind {
+    pub fn same_variant(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct PingTargetConfig {
+    pub completion_url: String,
+    pub completion_options: Vec<String>,
+    pub start_url: String,
+    pub start_options: Vec<String>,
+    pub success_url: String,
+    pub success_options: Vec<String>,
+    pub failure_url: String,
+    pub failure_options: Vec<String>,
+}
+
+impl PingTargetConfig {
+    fn as_legacy(&self, target: &NotificationTarget) -> PingConfig {
+        PingConfig {
+            enabled: target.enabled,
+            on_start: target.on_start,
+            on_success: target.on_success,
+            on_failure: target.on_failure,
+            completion_url: self.completion_url.clone(),
+            completion_options: self.completion_options.clone(),
+            start_url: self.start_url.clone(),
+            start_options: self.start_options.clone(),
+            success_url: self.success_url.clone(),
+            success_options: self.success_options.clone(),
+            failure_url: self.failure_url.clone(),
+            failure_options: self.failure_options.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct MailTargetConfig {
+    pub smtp_options: Vec<String>,
+    pub to: String,
+}
+
+impl MailTargetConfig {
+    fn as_legacy(&self, target: &NotificationTarget) -> MailConfig {
+        MailConfig {
+            enabled: target.enabled,
+            smtp_options: self.smtp_options.clone(),
+            to: self.to.clone(),
+            on_start: target.on_start,
+            on_success: target.on_success,
+            on_failure: target.on_failure,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ServerChanTargetConfig {
+    #[serde(default)]
+    pub channel: ServerChanChannel,
+    pub send_key: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerChanChannel {
+    App,
+    #[default]
+    Wechat,
+}
+
+impl std::fmt::Display for ServerChanChannel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::App => "app",
+            Self::Wechat => "wechat",
+        })
+    }
+}
+
+impl std::str::FromStr for ServerChanChannel {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "app" => Ok(Self::App),
+            "wechat" => Ok(Self::Wechat),
+            _ => Err("ServerChan channel must be app or wechat".into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct NtfyTargetConfig {
+    pub server: String,
+    pub topic: String,
+    pub token: String,
+}
+
+impl NtfyTargetConfig {
+    fn validate(&self, enabled: bool) -> Result<(), String> {
+        if self.server.chars().count() > 2048
+            || self.server.contains(['\0', '\r', '\n'])
+            || self.topic.is_empty()
+            || self.topic.chars().count() > 64
+            || !self
+                .topic
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            || self.token.chars().count() > 1024
+            || self.token.contains(['\0', '\r', '\n'])
+        {
+            return Err("ntfy notification configuration is invalid".into());
+        }
+        if enabled {
+            let url = url::Url::parse(&self.server)
+                .map_err(|_| "ntfy server URL is invalid".to_owned())?;
+            if url.scheme() != "https" || url.host_str().is_none() {
+                return Err("ntfy server URL must use HTTPS".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ServerChanTargetConfig {
+    fn validate(&self, enabled: bool) -> Result<(), String> {
+        if self.send_key.chars().count() > 256
+            || self.send_key.contains(['\0', '\r', '\n'])
+            || (enabled && self.send_key.trim().is_empty())
+        {
+            return Err("ServerChan SendKey is invalid".into());
+        }
         Ok(())
     }
 }
@@ -532,7 +955,7 @@ async fn validate_mail_network_target(mail: &MailConfig) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn smtp_server_from_options(options: &[String]) -> Option<&str> {
+pub fn smtp_server_from_options(options: &[String]) -> Option<&str> {
     let mut index = 0;
     while index < options.len() {
         let value = if options[index] == "-S" {
@@ -552,7 +975,7 @@ pub(crate) fn smtp_server_from_options(options: &[String]) -> Option<&str> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ResolvedTarget {
+pub struct ResolvedTarget {
     pub host: String,
     pub port: u16,
     pub addresses: Vec<IpAddr>,
@@ -688,6 +1111,8 @@ pub struct ServerChanConfig {
     pub enabled: bool,
     #[serde(default)]
     pub send_key: String,
+    #[serde(default = "default_serverchan_channel")]
+    pub channel: String,
     #[serde(default = "default_true")]
     pub on_start: bool,
     #[serde(default = "default_true")]
@@ -701,11 +1126,16 @@ impl Default for ServerChanConfig {
         Self {
             enabled: false,
             send_key: String::new(),
+            channel: default_serverchan_channel(),
             on_start: true,
             on_success: true,
             on_failure: true,
         }
     }
+}
+
+fn default_serverchan_channel() -> String {
+    "wechat".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -727,8 +1157,6 @@ pub struct GlobalNotificationSettings {
     pub confirmed: bool,
     #[serde(default)]
     pub config: NotificationConfig,
-    #[serde(default)]
-    pub candidates: Vec<NotificationCandidate>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -737,18 +1165,9 @@ impl Default for GlobalNotificationSettings {
         Self {
             confirmed: false,
             config: NotificationConfig::default(),
-            candidates: Vec::new(),
             updated_at: Utc::now(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct NotificationCandidate {
-    pub plan_id: Uuid,
-    pub plan_name: String,
-    pub plan_updated_at: DateTime<Utc>,
-    pub config: NotificationConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -904,10 +1323,7 @@ fn validate_mail_address(value: &str, field: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) async fn resolve_public_url(
-    value: &str,
-    channel: &str,
-) -> Result<ResolvedTarget, String> {
+pub async fn resolve_public_url(value: &str, channel: &str) -> Result<ResolvedTarget, String> {
     let parsed = url::Url::parse(value).map_err(|_| format!("{channel} URL is invalid"))?;
     let host = parsed
         .host_str()
@@ -1036,6 +1452,93 @@ mod tests {
             DEFAULT_REMOTE_CHECK_CONCURRENCY
         );
         assert!(input.validate().is_ok());
+    }
+
+    #[test]
+    fn archive_password_hint_defaults_for_existing_plans() {
+        let input = valid_plan_input();
+        assert!(input.archive.password_hint.is_empty());
+    }
+
+    #[test]
+    fn archive_password_hint_rejects_multiline_and_oversized_values() {
+        for hint in ["line one\nline two".into(), "x".repeat(161)] {
+            let mut input = valid_plan_input();
+            input.archive.password_hint = hint;
+            assert_eq!(
+                input.validate().unwrap_err(),
+                "archive password hint is invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn notification_target_enum_round_trips_with_a_type_discriminator() {
+        let target = NotificationTarget {
+            id: "mail-home".into(),
+            name: "家庭邮箱".into(),
+            enabled: true,
+            on_start: false,
+            on_success: true,
+            on_failure: true,
+            kind: NotificationTargetKind::Email {
+                config: MailTargetConfig {
+                    smtp_options: vec!["-S".into(), "mta=smtps://smtp.example".into()],
+                    to: "backup@example.com".into(),
+                },
+            },
+        };
+        let value = serde_json::to_value(&target).unwrap();
+        assert_eq!(value["type"], "email");
+        assert!(value.get("ping").is_none());
+        assert_eq!(
+            serde_json::from_value::<NotificationTarget>(value).unwrap(),
+            target
+        );
+    }
+
+    #[test]
+    fn redacted_secrets_are_never_merged_across_target_variants() {
+        let stored = NotificationTarget {
+            id: "same-id".into(),
+            name: "ntfy".into(),
+            enabled: true,
+            on_start: false,
+            on_success: true,
+            on_failure: true,
+            kind: NotificationTargetKind::Ntfy {
+                config: NtfyTargetConfig {
+                    server: "https://ntfy.sh".into(),
+                    topic: "backup".into(),
+                    token: "secret-token".into(),
+                },
+            },
+        };
+        let incoming = NotificationTarget {
+            id: "same-id".into(),
+            name: "Ping".into(),
+            enabled: true,
+            on_start: false,
+            on_success: true,
+            on_failure: true,
+            kind: NotificationTargetKind::Ping {
+                config: PingTargetConfig {
+                    success_url: "https://example.com/hook".into(),
+                    ..Default::default()
+                },
+            },
+        };
+        let mut config = NotificationConfig {
+            targets: vec![incoming],
+            ..Default::default()
+        };
+        let existing = NotificationConfig {
+            targets: vec![stored],
+            ..Default::default()
+        };
+        config.merge_redacted_from(&existing);
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(!serialized.contains("secret-token"));
     }
 
     #[test]

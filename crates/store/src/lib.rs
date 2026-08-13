@@ -1,6 +1,3 @@
-use crate::model::{
-    GlobalNotificationSettings, NotificationCandidate, NotificationConfig, Plan, RunRecord,
-};
 use aes_gcm::{
     Aes256Gcm, KeyInit,
     aead::{Aead, OsRng, rand_core::RngCore},
@@ -8,6 +5,7 @@ use aes_gcm::{
 use anyhow::{Context, bail};
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use chrono::Utc;
+use rclone_backup_core::{GlobalNotificationSettings, NotificationConfig, Plan, RunRecord};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::{fs, path::Path};
 use uuid::Uuid;
@@ -38,7 +36,6 @@ impl Store {
         };
         store.migrate().await?;
         store.encrypt_existing_plans().await?;
-        store.migrate_global_notifications().await?;
         Ok(store)
     }
 
@@ -78,17 +75,34 @@ impl Store {
         if existing.is_some() {
             return Ok(false);
         }
+        let mut imported_targets = Vec::new();
         for plan in plans {
-            let document = self.encode_plan(plan)?;
+            let mut plan = plan.clone();
+            imported_targets.append(&mut plan.notifications.targets);
+            plan.notifications = NotificationConfig::default();
+            let document = self.encode_plan(&plan)?;
             sqlx::query("INSERT INTO plans(id,name,enabled,document,created_at,updated_at) VALUES(?,?,?,?,?,?)")
                 .bind(plan.id.to_string()).bind(&plan.name).bind(plan.enabled).bind(document).bind(plan.created_at.to_rfc3339()).bind(plan.updated_at.to_rfc3339()).execute(&mut *tx).await?;
+        }
+        imported_targets = normalize_imported_targets(imported_targets)?;
+        if !imported_targets.is_empty() {
+            let settings = GlobalNotificationSettings {
+                confirmed: true,
+                config: NotificationConfig {
+                    targets: imported_targets,
+                    ..Default::default()
+                },
+                updated_at: Utc::now(),
+            };
+            let document = self.encode_document(&settings, "notification settings")?;
+            sqlx::query("INSERT INTO settings(key,document,updated_at) VALUES('notifications',?,?) ON CONFLICT(key) DO NOTHING")
+                .bind(document).bind(settings.updated_at.to_rfc3339()).execute(&mut *tx).await?;
         }
         sqlx::query("INSERT INTO metadata(key,value) VALUES('environment_imported',?)")
             .bind(Utc::now().to_rfc3339())
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        self.migrate_global_notifications().await?;
         Ok(true)
     }
 
@@ -131,9 +145,11 @@ impl Store {
             sqlx::query_as("SELECT document FROM settings WHERE key = 'notifications'")
                 .fetch_optional(&self.pool)
                 .await?;
-        row.map(|(document,)| self.decode_document(&document, "notification settings"))
-            .transpose()
-            .map(|value| value.unwrap_or_default())
+        let settings: GlobalNotificationSettings = row
+            .map(|(document,)| self.decode_document(&document, "notification settings"))
+            .transpose()?
+            .unwrap_or_default();
+        Ok(settings)
     }
 
     pub async fn confirmed_notifications(&self) -> anyhow::Result<Option<NotificationConfig>> {
@@ -278,65 +294,32 @@ impl Store {
         }
         Ok(())
     }
+}
 
-    async fn migrate_global_notifications(&self) -> anyhow::Result<()> {
-        let exists: Option<(String,)> =
-            sqlx::query_as("SELECT key FROM settings WHERE key = 'notifications'")
-                .fetch_optional(&self.pool)
-                .await?;
-        if exists.is_some() {
-            return Ok(());
+fn normalize_imported_targets(
+    targets: Vec<rclone_backup_core::NotificationTarget>,
+) -> anyhow::Result<Vec<rclone_backup_core::NotificationTarget>> {
+    let mut normalized = Vec::with_capacity(targets.len());
+    for target in targets {
+        match normalized
+            .iter()
+            .find(|existing: &&rclone_backup_core::NotificationTarget| existing.id == target.id)
+        {
+            Some(existing) if *existing == target => continue,
+            Some(_) => bail!(
+                "environment notification target ID '{}' has conflicting configurations; use unique target IDs",
+                target.id
+            ),
+            None => normalized.push(target),
         }
-        let plans = self.list_plans().await?;
-        if plans.is_empty() {
-            return Ok(());
-        }
-        let mut candidates: Vec<NotificationCandidate> = plans
-            .into_iter()
-            .map(|plan| {
-                let mut config = plan.notifications;
-                config.normalize_legacy();
-                NotificationCandidate {
-                    plan_id: plan.id,
-                    plan_name: plan.name,
-                    plan_updated_at: plan.updated_at,
-                    config,
-                }
-            })
-            .collect();
-        let unanimous = candidates
-            .windows(2)
-            .all(|pair| pair[0].config == pair[1].config);
-        let has_configuration = candidates
-            .first()
-            .is_some_and(|candidate| !candidate.config.is_empty());
-        let valid = candidates
-            .first()
-            .is_none_or(|candidate| candidate.config.validate().is_ok());
-        let settings = if unanimous && has_configuration && valid {
-            GlobalNotificationSettings {
-                confirmed: true,
-                config: candidates
-                    .pop()
-                    .map(|candidate| candidate.config)
-                    .unwrap_or_default(),
-                candidates: Vec::new(),
-                updated_at: Utc::now(),
-            }
-        } else {
-            GlobalNotificationSettings {
-                confirmed: false,
-                config: NotificationConfig::default(),
-                candidates: if has_configuration || !unanimous {
-                    candidates
-                } else {
-                    Vec::new()
-                },
-                updated_at: Utc::now(),
-            }
-        };
-        self.save_notification_settings(&settings).await
     }
+    NotificationConfig {
+        targets: normalized.clone(),
+        ..Default::default()
+    }
+    .validate()
+    .map_err(anyhow::Error::msg)?;
+    Ok(normalized)
 }
 
 type RunRow = (
@@ -426,37 +409,8 @@ fn decode_key(value: &str) -> anyhow::Result<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::plans_from_environment;
-
-    fn notification_plan(name: &str, url: &str) -> Plan {
-        let now = Utc::now();
-        let input = crate::model::PlanInput {
-            name: name.into(),
-            enabled: true,
-            schedule: "5 * * * *".into(),
-            timezone: "UTC".into(),
-            sources: vec![crate::model::FolderSource {
-                name: "data".into(),
-                path: "/data".into(),
-            }],
-            archive: Default::default(),
-            remotes: vec![crate::model::RemoteConfig {
-                name: "remote".into(),
-                directory: "/backup".into(),
-            }],
-            retention: Default::default(),
-            retry: Default::default(),
-            notifications: crate::model::NotificationConfig {
-                ping: crate::model::PingConfig {
-                    success_url: url.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            rclone_flags: vec![],
-            remote_check_concurrency: crate::model::DEFAULT_REMOTE_CHECK_CONCURRENCY,
-        };
-        input.into_plan(Uuid::new_v4(), now)
+    fn plans_from_environment() -> Vec<Plan> {
+        Vec::new()
     }
 
     #[tokio::test]
@@ -469,7 +423,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let plans = plans_from_environment().unwrap();
+        let plans = plans_from_environment();
         assert!(store.seed_once(&plans).await.unwrap());
         assert!(!store.seed_once(&plans).await.unwrap());
         assert_eq!(store.list_plans().await.unwrap().len(), plans.len());
@@ -485,24 +439,25 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut plans = plans_from_environment().unwrap();
+        let mut plans = plans_from_environment();
         if plans.is_empty() {
             let now = Utc::now();
-            let input = crate::model::PlanInput {
+            let input = rclone_backup_core::PlanInput {
                 name: "secret-test".into(),
                 enabled: true,
                 schedule: "5 * * * *".into(),
                 timezone: "UTC".into(),
-                sources: vec![crate::model::FolderSource {
+                sources: vec![rclone_backup_core::FolderSource {
                     name: "data".into(),
                     path: "/data".into(),
                 }],
-                archive: crate::model::ArchiveConfig {
+                archive: rclone_backup_core::ArchiveConfig {
                     kind: "7z".into(),
                     password: "never-plaintext".into(),
+                    password_hint: "stored separately".into(),
                     suffix: "%Y%m%d".into(),
                 },
-                remotes: vec![crate::model::RemoteConfig {
+                remotes: vec![rclone_backup_core::RemoteConfig {
                     name: "remote".into(),
                     directory: "/backup".into(),
                 }],
@@ -510,7 +465,7 @@ mod tests {
                 retry: Default::default(),
                 notifications: Default::default(),
                 rclone_flags: vec![],
-                remote_check_concurrency: crate::model::DEFAULT_REMOTE_CHECK_CONCURRENCY,
+                remote_check_concurrency: rclone_backup_core::DEFAULT_REMOTE_CHECK_CONCURRENCY,
             };
             plans.push(input.into_plan(Uuid::new_v4(), now));
         }
@@ -534,65 +489,32 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn identical_legacy_notifications_migrate_encrypted_and_confirmed() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = Store::connect(
-            "sqlite::memory:",
-            directory.path().join("key").to_str().unwrap(),
-            None,
-        )
-        .await
-        .unwrap();
-        store
-            .save_plan(&notification_plan("first", "https://notify.example/secret"))
-            .await
-            .unwrap();
-        store
-            .save_plan(&notification_plan(
-                "second",
-                "https://notify.example/secret",
-            ))
-            .await
-            .unwrap();
-        store.migrate_global_notifications().await.unwrap();
-
-        let settings = store.notification_settings().await.unwrap();
-        assert!(settings.confirmed);
-        assert!(settings.config.ping.enabled);
-        assert!(settings.candidates.is_empty());
-        let (document,): (String,) =
-            sqlx::query_as("SELECT document FROM settings WHERE key='notifications'")
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
-        assert!(document.starts_with(ENCRYPTED_PREFIX));
-        assert!(!document.contains("secret"));
+    fn legacy_ping(url: &str) -> rclone_backup_core::NotificationTarget {
+        let mut config = NotificationConfig::default();
+        config.ping.enabled = true;
+        config.ping.success_url = url.into();
+        config.promote_legacy_targets();
+        config.targets.remove(0)
     }
 
-    #[tokio::test]
-    async fn conflicting_legacy_notifications_require_confirmation() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = Store::connect(
-            "sqlite::memory:",
-            directory.path().join("key").to_str().unwrap(),
-            None,
-        )
-        .await
-        .unwrap();
-        store
-            .save_plan(&notification_plan("first", "https://one.example/token"))
-            .await
-            .unwrap();
-        store
-            .save_plan(&notification_plan("second", "https://two.example/token"))
-            .await
-            .unwrap();
-        store.migrate_global_notifications().await.unwrap();
+    #[test]
+    fn imported_targets_deduplicate_identical_legacy_records() {
+        let target = legacy_ping("https://notify.example/success");
+        assert_eq!(
+            normalize_imported_targets(vec![target.clone(), target])
+                .unwrap()
+                .len(),
+            1
+        );
+    }
 
-        let settings = store.notification_settings().await.unwrap();
-        assert!(!settings.confirmed);
-        assert_eq!(settings.candidates.len(), 2);
-        assert!(store.confirmed_notifications().await.unwrap().is_none());
+    #[test]
+    fn imported_targets_reject_conflicting_legacy_records() {
+        let error = normalize_imported_targets(vec![
+            legacy_ping("https://one.example/success"),
+            legacy_ping("https://two.example/success"),
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("conflicting configurations"));
     }
 }

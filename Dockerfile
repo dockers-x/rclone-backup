@@ -3,9 +3,10 @@ FROM rust:1.97-alpine AS builder
 WORKDIR /src
 RUN apk add --no-cache musl-dev
 COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
 COPY src ./src
 COPY web ./web
-RUN cargo build --locked --release
+RUN cargo build --locked --release -p rclone-backup
 
 FROM rclone/rclone:1.75.0
 

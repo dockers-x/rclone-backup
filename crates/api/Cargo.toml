@@ -1,0 +1,26 @@
+[package]
+name = "rclone-backup-api"
+version = "2.0.4"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+axum = { version = "0.8", features = ["macros"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+rclone-backup-core = { path = "../core" }
+rclone-backup-runner = { path = "../runner" }
+rclone-backup-store = { path = "../store" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+subtle = "2.6"
+tower-http = { version = "0.6", features = ["catch-panic", "compression-gzip", "limit", "set-header"] }
+tracing = "0.1"
+url = "2.5"
+uuid = { version = "1.18", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tempfile = "3.20"
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }

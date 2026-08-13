@@ -1,7 +1,7 @@
-pub mod api;
 pub mod config;
-pub mod model;
-pub mod rc;
-pub mod runner;
-pub mod schedule;
-pub mod store;
+pub use rclone_backup_api as api;
+pub use rclone_backup_core as model;
+pub use rclone_backup_core::schedule;
+pub use rclone_backup_rclone as rc;
+pub use rclone_backup_runner as runner;
+pub use rclone_backup_store as store;

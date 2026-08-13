@@ -226,15 +226,25 @@ dialog { color: var(--text); }
 .password-toggle { position: absolute; top: 0; right: 0; width: 44px; height: 44px; display: grid; place-items: center; cursor: pointer; color: var(--text-tertiary); border: 0; background: transparent; }
 .password-toggle svg { width: 18px; height: 18px; }
 .password-toggle:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: 9px; }
-.retention-grid { align-items: stretch; }
-.retention-option { min-width: 0; padding: 13px; display: grid; gap: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-soft); color: var(--text-secondary); }
-.retention-option > span { display: flex; align-items: center; gap: 8px; }
-.retention-option > span input { width: 16px; height: 16px; accent-color: var(--accent); }
-.retention-option > input { width: 100%; height: 44px; padding: 0 12px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 9px; outline: none; }
-.retention-option > input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
-.retention-option > input:disabled { opacity: .48; cursor: not-allowed; }
-.retention-option small { color: var(--text-tertiary); line-height: 1.35; }
-.retention-option:has(> span input:checked) { border-color: color-mix(in srgb, var(--accent) 44%, var(--border)); background: color-mix(in srgb, var(--accent) 5%, var(--surface-soft)); }
+.password-toggle:disabled { opacity: .38; cursor: default; }
+.retention-list { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-soft); }
+.retention-row { min-height: 72px; padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr) 132px; align-items: center; gap: 18px; }
+.retention-row + .retention-row { border-top: 1px solid var(--border); }
+.retention-toggle { min-width: 0; display: flex; align-items: center; gap: 11px; cursor: pointer; }
+.retention-toggle > input { width: 17px; height: 17px; flex: 0 0 auto; accent-color: var(--accent); }
+.retention-toggle > span { min-width: 0; display: grid; gap: 2px; }
+.retention-toggle strong { color: var(--text); font-size: 13px; }
+.retention-toggle small { color: var(--text-tertiary); font-size: 11px; line-height: 1.35; }
+.retention-value { height: 40px; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.retention-value input { min-width: 0; width: 100%; height: 40px; padding: 0 10px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-right: 0; border-radius: 8px 0 0 8px; outline: none; font-variant-numeric: tabular-nums; }
+.retention-value b { min-width: 38px; height: 40px; display: grid; place-items: center; color: var(--text-tertiary); background: var(--surface); border: 1px solid var(--border); border-radius: 0 8px 8px 0; font-size: 11px; font-weight: 600; }
+.retention-value:focus-within input, .retention-value:focus-within b { border-color: var(--accent); }
+.retention-value:has(input:disabled) { opacity: .42; }
+.retention-value input:disabled { cursor: not-allowed; }
+.retention-toggle:active { transform: scale(.985); }
+@media (hover: hover) and (pointer: fine) {
+  .retention-row:hover { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+}
 .switch-field { min-height: 60px; padding: 10px 12px; display: flex; align-items: center; gap: 15px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-soft); cursor: pointer; }
 .switch-field > span { margin-right: auto; display: grid; }
 .switch-field strong { font-size: 13px; }
@@ -304,8 +314,30 @@ dialog { color: var(--text); }
 .provider-fields { margin-top: 18px; }
 .advanced-provider { margin-top: 18px; border-top: 1px solid var(--border); }
 .advanced-provider summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; color: var(--text-secondary); font-size: 13px; font-weight: 600; }
-.notification-panel { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.notification-panel > .form-error, .notification-actions { grid-column: 1 / -1; }
+.notification-panel { display: grid; gap: 14px; }
+.notification-toolbar { min-height: 56px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; border-bottom: 1px solid var(--border); }
+.notification-toolbar > span { margin-right: auto; color: var(--text-tertiary); font: 12px "Fira Code", monospace; }
+.inline-select { width: min(230px, 44vw); }
+.notification-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+.notification-target { border-bottom: 1px solid var(--border); background: var(--surface); animation: target-status-in 180ms var(--ease-out) both; animation-delay: min(calc(var(--index) * 24ms), 120ms); }
+.notification-row { min-height: 76px; display: grid; grid-template-columns: 40px minmax(160px, 1fr) minmax(170px, .7fr) 44px 44px; align-items: center; gap: 10px; }
+.notification-identity { min-width: 0; padding: 10px 4px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.notification-identity b, .notification-identity small, .notification-meta span, .notification-meta small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notification-identity b { font-size: 14px; }
+.notification-identity small, .notification-meta small { margin-top: 3px; color: var(--text-tertiary); font-size: 11px; }
+.notification-meta { min-width: 0; color: var(--text-secondary); font-size: 12px; }
+.notification-editor { padding: 0 54px 18px; }
+.notification-editor > fieldset { margin: 0; padding: 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); }
+.notification-editor > fieldset > legend { padding: 0 7px; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
+.notification-editor .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.event-fieldset { margin: 18px 0 0; padding: 0; border: 0; }
+.event-fieldset > legend { margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
+.notification-editor-actions { min-height: 56px; margin-top: 12px; display: flex; align-items: center; gap: 10px; }
+.notification-editor-actions .target-test-status { margin-left: auto; color: var(--text-tertiary); font-size: 12px; }
+.target-test-status[data-state="success"] { color: var(--success); }
+.target-test-status[data-state="error"], .danger-text { color: var(--danger); }
+.field-link { min-height: 44px; display: inline-flex; align-items: center; color: var(--accent); font-size: 12px; }
+.notification-empty { padding-block: 36px; }
 .channel-card { min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .channel-card > header { min-height: 84px; padding: 17px; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: start; gap: 11px; border-bottom: 1px solid var(--border); }
 .channel-card h3 { margin: 0; font-size: 15px; }
@@ -369,8 +401,6 @@ dialog { color: var(--text); }
   .topbar > div:first-of-type { margin-right: auto; margin-left: 10px; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
   .account-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .notification-panel { grid-template-columns: 1fr; }
-  .notification-panel > .form-error, .notification-actions { grid-column: auto; }
   .metric:nth-child(2) { border-right: 0; }
   .metric:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
 }
@@ -423,6 +453,19 @@ dialog { color: var(--text); }
   .repeat-row .field, .repeat-row .grow { width: auto; grid-column: 1 / -1; }
   .repeat-row .icon-button { grid-column: 2; grid-row: 1; justify-self: end; }
   .details-content { padding-left: 0; }
+  .notification-toolbar { align-items: stretch; flex-wrap: wrap; padding-bottom: 12px; }
+  .notification-toolbar > span { width: 100%; }
+  .inline-select { width: min(100%, 230px); }
+  .notification-row { grid-template-columns: 40px minmax(0, 1fr) 44px 44px; gap: 7px; }
+  .notification-meta { grid-column: 2 / 3; margin-top: -12px; padding-bottom: 9px; }
+  .notification-row > .compact-switch { grid-column: 3; grid-row: 1 / span 2; }
+  .notification-row > .icon-button { grid-column: 4; grid-row: 1 / span 2; }
+  .notification-editor { padding: 0 0 16px; }
+  .notification-editor > fieldset { padding: 14px; }
+  .notification-editor .form-grid { grid-template-columns: 1fr; }
+  .notification-editor .span-2 { grid-column: auto; }
+  .notification-editor-actions { align-items: stretch; flex-wrap: wrap; }
+  .notification-editor-actions .target-test-status { width: 100%; order: -1; margin: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

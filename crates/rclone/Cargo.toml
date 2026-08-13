@@ -1,0 +1,12 @@
+[package]
+name = "rclone-backup-rclone"
+version = "2.0.4"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+rand = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde_json = "1.0"
+tokio = { version = "1.47", features = ["process", "sync", "time"] }
