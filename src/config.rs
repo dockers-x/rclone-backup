@@ -67,13 +67,7 @@ impl AppConfig {
                 );
             }
         };
-        let site_name = resolve("RCLONE_BACKUP_SITE_NAME", &dotenv)
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "Rclone Backup".into());
-        if site_name.chars().count() > 80 {
-            return Err("RCLONE_BACKUP_SITE_NAME cannot exceed 80 characters".into());
-        }
+        let site_name = configured_site_name(resolve("RCLONE_BACKUP_SITE_NAME", &dotenv))?;
         Ok(Self {
             address: env::var("RCLONE_BACKUP_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()),
             site_name,
@@ -183,7 +177,7 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
     } else {
         "zip"
     };
-    PlanInput {
+    let mut input = PlanInput {
         name: display_name,
         enabled: true,
         schedule: nonempty(get("CRON"), "5 * * * *"),
@@ -236,7 +230,12 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
             },
         },
         rclone_flags: split_args(&get("RCLONE_GLOBAL_FLAG")),
+    };
+    if let Err(reason) = input.notifications.normalize_legacy_mail() {
+        tracing::warn!(%reason, "legacy SMTP configuration was disabled during migration");
+        input.notifications.mail = MailConfig::default();
     }
+    input
 }
 
 fn normalize_legacy_timezone(value: &str) -> String {
@@ -322,6 +321,31 @@ fn unquote(value: &str) -> String {
         .to_owned()
 }
 
+fn normalize_site_name(value: &str) -> String {
+    let value = value.trim();
+    let unquoted = [('"', '"'), ('\'', '\''), ('“', '”'), ('‘', '’')]
+        .into_iter()
+        .find_map(|(opening, closing)| {
+            value
+                .strip_prefix(opening)
+                .and_then(|value| value.strip_suffix(closing))
+        })
+        .unwrap_or(value);
+    unquoted.trim().to_owned()
+}
+
+fn configured_site_name(value: Option<String>) -> Result<String, String> {
+    let site_name = value
+        .as_deref()
+        .map(normalize_site_name)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Rclone Backup".into());
+    if site_name.chars().count() > 80 {
+        return Err("RCLONE_BACKUP_SITE_NAME cannot exceed 80 characters".into());
+    }
+    Ok(site_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,5 +379,84 @@ mod tests {
             split_args("--header 'X-Test: hello world'"),
             ["--header", "X-Test: hello world"]
         );
+    }
+
+    #[test]
+    fn site_name_removes_only_matching_outer_quotes() {
+        assert_eq!(
+            normalize_site_name("  \"Vaultwarden+ Backup\"  "),
+            "Vaultwarden+ Backup"
+        );
+        assert_eq!(
+            normalize_site_name("'Vaultwarden+ Backup'"),
+            "Vaultwarden+ Backup"
+        );
+        assert_eq!(
+            normalize_site_name("“Vaultwarden+ 备份”"),
+            "Vaultwarden+ 备份"
+        );
+        assert_eq!(
+            normalize_site_name("‘Vaultwarden+ 备份’"),
+            "Vaultwarden+ 备份"
+        );
+        assert_eq!(
+            normalize_site_name("Vaultwarden+ \"Backup\""),
+            "Vaultwarden+ \"Backup\""
+        );
+        assert_eq!(
+            normalize_site_name("“Vaultwarden+ Backup"),
+            "“Vaultwarden+ Backup"
+        );
+        assert_eq!(
+            normalize_site_name("\"Vaultwarden+ Backup’"),
+            "\"Vaultwarden+ Backup’"
+        );
+        assert_eq!(
+            normalize_site_name("“Vaultwarden \"Backup\"”"),
+            "Vaultwarden \"Backup\""
+        );
+    }
+
+    #[test]
+    fn site_name_falls_back_after_unquoting_and_checks_normalized_length() {
+        assert_eq!(
+            configured_site_name(Some("  “  ”  ".into())).unwrap(),
+            "Rclone Backup"
+        );
+
+        let maximum = "备".repeat(80);
+        assert_eq!(
+            configured_site_name(Some(format!("“{maximum}”"))).unwrap(),
+            maximum
+        );
+        assert!(configured_site_name(Some(format!("\"{}\"", "备".repeat(81)))).is_err());
+    }
+
+    #[test]
+    fn legacy_s_nail_mail_options_are_converted_for_curl() {
+        let dotenv = HashMap::from([
+            ("MAIL_SMTP_ENABLE".into(), "true".into()),
+            ("MAIL_TO".into(), "receiver@example.com".into()),
+            (
+                "MAIL_SMTP_VARIABLES".into(),
+                "-S v15-compat -S mta=smtp://smtp.example:587 -S smtp-use-starttls -S smtp-auth=login -S user=alice@example.com -S password=test-secret -S 'from=Backup <alice@example.com>'".into(),
+            ),
+        ]);
+        let input = legacy_plan_input(&dotenv);
+
+        assert_eq!(
+            input.notifications.mail.smtp_options,
+            [
+                "-S",
+                "mta=smtp://smtp.example:587",
+                "-S",
+                "smtp-auth-user=alice@example.com",
+                "-S",
+                "smtp-auth-password=test-secret",
+                "-S",
+                "from=alice@example.com",
+            ]
+        );
+        assert!(input.validate().is_ok());
     }
 }

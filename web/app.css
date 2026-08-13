@@ -83,7 +83,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .brand > span:last-child { min-width: 0; }
 .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; background: var(--text); color: var(--surface); }
 .brand-mark svg { width: 22px; height: 22px; }
-.brand strong { display: block; overflow: hidden; font-size: 17px; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.brand strong { display: -webkit-box; overflow: hidden; font-size: 16px; line-height: 1.2; letter-spacing: -.02em; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .brand small { display: block; margin-top: 1px; color: var(--text-tertiary); font: 600 9px/1.2 "Fira Code", monospace; letter-spacing: .12em; }
 .sidebar nav { display: grid; gap: 5px; }
 .nav-item { min-height: 46px; padding: 0 13px; display: flex; align-items: center; gap: 12px; color: var(--text-secondary); text-decoration: none; border-radius: 10px; transition: color 160ms ease, background-color 160ms ease; }
@@ -119,7 +119,11 @@ html[data-theme="dark"] .button.primary { color: #18120a; background: var(--acce
 .button:disabled { cursor: wait; opacity: .58; transform: none; }
 .mobile-menu { display: none; }
 
-main { width: min(1320px, 100%); margin: 0 auto; padding: 54px clamp(20px, 4vw, 56px) 80px; }
+main { width: min(1320px, 100%); margin: 0 auto; padding: 54px clamp(20px, 4vw, 56px) 80px; overflow-x: clip; }
+.page-view { min-width: 0; }
+.page-view[hidden] { display: none; }
+#newPlanButton[hidden] { display: none; }
+.page-view > .section-block:only-child { padding-top: 0; }
 .readiness-banner { margin-bottom: 30px; padding: 16px 18px; display: flex; align-items: center; gap: 14px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border)); border-radius: var(--radius); background: var(--accent-soft); }
 .readiness-banner[hidden] { display: none; }
 .readiness-banner > div:nth-child(2) { margin-right: auto; }
@@ -320,6 +324,14 @@ dialog { color: var(--text); }
 .candidate-list article { min-height: 58px; padding: 8px 8px 8px 12px; display: flex; align-items: center; gap: 12px; justify-content: space-between; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 8px; background: var(--surface); color: var(--text); }
 .candidate-list b, .candidate-list small { display: block; }
 .candidate-list small { margin-top: 2px; color: var(--text-tertiary); }
+.candidate-feedback { margin: 0 0 16px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 9px; color: var(--accent-strong); background: var(--accent-soft); font-size: 13px; }
+.candidate-feedback[data-state="success"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, var(--border)); background: var(--success-soft); }
+.candidate-feedback[data-state="warning"] { color: var(--accent-strong); }
+.candidate-feedback strong { display: block; }
+.candidate-feedback ul { margin: 8px 0 0; padding-left: 20px; color: var(--text); }
+.candidate-feedback li + li { margin-top: 4px; }
+.candidate-error { margin: 0 0 16px; }
+.candidate-list .button[data-state="success"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); background: var(--success-soft); }
 .remote-result { margin-top: 18px; padding: 13px; border-radius: 10px; color: var(--accent); background: var(--accent-soft); font-size: 13px; white-space: pre-wrap; }
 .toast-region { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); z-index: 40; display: grid; gap: 8px; pointer-events: none; }
 .toast { max-width: min(380px, calc(100vw - 40px)); padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: 13px; transition: opacity 160ms ease, transform 180ms var(--ease-out); }
@@ -356,7 +368,9 @@ dialog { color: var(--text); }
 
 @media (max-width: 700px) {
   .topbar { height: 72px; padding-inline: 16px; }
-  .topbar > div:first-of-type { display: none; }
+  .topbar > div:first-of-type { min-width: 0; margin-left: 8px; }
+  .topbar > div:first-of-type .eyebrow { display: none; }
+  .topbar h1 { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
   .language-button span, #newPlanButton span { display: none; }
   #newPlanButton { width: 44px; padding: 0; }
   main { padding: 36px 16px 64px; }

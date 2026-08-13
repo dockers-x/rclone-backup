@@ -46,7 +46,7 @@ const translations = {
     globalSettings: "全局设置", notConfigured: "未配置", configured: "已启用", globalNotificationHint: "所有手动与定时备份共用这一套通知配置。",
     pingHint: "向健康检查或 Webhook URL 报告备份事件", enablePing: "启用 Ping", completionUrl: "完成 URL（成功或失败）", startUrl: "开始 URL", successUrl: "成功 URL", failureUrl: "失败 URL",
     onStart: "开始", onSuccess: "成功", onFailure: "失败", smtpGlobalHint: "需填写 smtps:// 服务器和发件地址", enableSmtp: "启用 SMTP", enableServerChan: "启用 ServerChan",
-    sendTest: "发送测试", testingNotification: "正在发送…", notificationTestSuccess: "测试通知已发送", saveNotifications: "保存通知配置", notificationSaved: "通知配置已保存", notificationConflict: "检测到旧备份方案使用了不同的通知配置。请选择一个来源，确认后才会启用全局通知。", useConfiguration: "使用此配置", updatedAt: "更新于",
+    sendTest: "发送测试", testingNotification: "正在发送…", notificationTestSuccess: "测试通知已发送", saveNotifications: "保存通知配置", notificationSaved: "通知配置已保存", notificationConflict: "检测到旧备份方案使用了不同的通知配置。请选择一个来源，确认后才会启用全局通知。", useConfiguration: "使用此配置", applyingConfiguration: "正在应用…", configurationApplied: "配置已应用", configurationAppliedWithWarnings: "配置已应用，但以下通道因迁移检查失败而停用：", channelDisabled: "{channel} 已停用：{reason}", updatedAt: "更新于",
   },
   en: {
     skip: "Skip to main content", plans: "Backup plans", history: "Run history", serviceOnline: "Service online",
@@ -92,15 +92,26 @@ const translations = {
     globalSettings: "Global settings", notConfigured: "Not configured", configured: "Enabled", globalNotificationHint: "All manual and scheduled backups share this notification configuration.",
     pingHint: "Report backup events to health-check or webhook URLs", enablePing: "Enable Ping", completionUrl: "Completion URL (success or failure)", startUrl: "Start URL", successUrl: "Success URL", failureUrl: "Failure URL",
     onStart: "Start", onSuccess: "Success", onFailure: "Failure", smtpGlobalHint: "Requires an smtps:// server and sender address", enableSmtp: "Enable SMTP", enableServerChan: "Enable ServerChan",
-    sendTest: "Send test", testingNotification: "Sending…", notificationTestSuccess: "Test notification sent", saveNotifications: "Save notifications", notificationSaved: "Notification settings saved", notificationConflict: "Legacy plans contain different notification settings. Select a source before global notifications can be enabled.", useConfiguration: "Use this configuration", updatedAt: "Updated",
+    sendTest: "Send test", testingNotification: "Sending…", notificationTestSuccess: "Test notification sent", saveNotifications: "Save notifications", notificationSaved: "Notification settings saved", notificationConflict: "Legacy plans contain different notification settings. Select a source before global notifications can be enabled.", useConfiguration: "Use this configuration", applyingConfiguration: "Applying…", configurationApplied: "Configuration applied", configurationAppliedWithWarnings: "Configuration applied, but these channels were disabled after migration checks failed:", channelDisabled: "{channel} disabled: {reason}", updatedAt: "Updated",
   },
 };
 
 const state = {
   language: localStorage.getItem("language") || (navigator.language.startsWith("zh") ? "zh" : "en"),
   theme: localStorage.getItem("theme") || "system",
-  plans: [], runs: [], remotes: [], notifications: null, status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, openRunId: null,
+  plans: [], runs: [], remotes: [], notifications: null, notificationMigrationWarnings: [], status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, openRunId: null, page: "plans",
 };
+
+const pageRoutes = {
+  plans: { path: "/plans", title: "backupPlans" },
+  accounts: { path: "/accounts", title: "storageAccounts" },
+  notifications: { path: "/notifications", title: "notifications" },
+  history: { path: "/history", title: "history" },
+};
+const pageNames = new Set(Object.keys(pageRoutes));
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let navigationPointer = null;
+let pageAnimation = null;
 
 function t(key) { return translations[state.language][key] || key; }
 function icon(name) { return `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`; }
@@ -129,19 +140,107 @@ function applyPreferences() {
   $("#languageButton span").textContent = state.language === "zh" ? "中文" : "EN";
   $("#newPlanButton").setAttribute("aria-label", t("newPlan"));
   $$("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });
+  $$("[data-feedback-key]").forEach((node) => { node.textContent = t(node.dataset.feedbackKey); });
   const passwordToggle = $("[data-action=\"toggle-password\"]");
   if (passwordToggle) passwordToggle.setAttribute("aria-label", t(passwordToggle.getAttribute("aria-pressed") === "true" ? "hidePassword" : "showPassword"));
   if ($("#planDialog")?.open) { updateArchiveHint(); updateScheduleBuilder(); }
-  updateNavigation();
+  renderPage(state.page);
+  if (state.notificationMigrationWarnings.length && !$("#notificationCandidateStatus").hidden) renderCandidateResult();
 }
 
-function updateNavigation() {
-  const id = location.hash.slice(1) || "plans";
-  $$(".nav-item").forEach((item) => {
-    const active = item.getAttribute("href") === `#${id}`;
+function showCandidateStatus(key, stateName) {
+  const status = $("#notificationCandidateStatus");
+  status.dataset.feedbackKey = key;
+  status.dataset.state = stateName;
+  status.textContent = t(key);
+  status.hidden = false;
+}
+
+function renderCandidateResult() {
+  const warnings = state.notificationMigrationWarnings;
+  if (!warnings.length) {
+    showCandidateStatus("configurationApplied", "success");
+    return;
+  }
+  const status = $("#notificationCandidateStatus");
+  delete status.dataset.feedbackKey;
+  status.dataset.state = "warning";
+  status.innerHTML = `<strong>${escapeHtml(t("configurationAppliedWithWarnings"))}</strong><ul>${warnings.map((warning) => {
+    const channel = ({ ping: "Ping", mail: "SMTP", serverchan: "ServerChan" })[warning.channel] || warning.channel;
+    const message = t("channelDisabled").replace("{channel}", channel).replace("{reason}", warning.reason);
+    return `<li>${escapeHtml(message)}</li>`;
+  }).join("")}</ul>`;
+  status.hidden = false;
+}
+
+function clearCandidateError() {
+  const error = $("#notificationCandidateError");
+  error.textContent = "";
+  error.hidden = true;
+}
+
+function clearCandidateResult() {
+  state.notificationMigrationWarnings = [];
+  const status = $("#notificationCandidateStatus");
+  delete status.dataset.feedbackKey;
+  delete status.dataset.state;
+  status.textContent = "";
+  status.hidden = true;
+  clearCandidateError();
+}
+
+function pageFromPath(pathname = location.pathname) {
+  const normalized = pathname !== "/" ? pathname.replace(/\/+$/, "") : pathname;
+  return Object.entries(pageRoutes).find(([, route]) => route.path === normalized)?.[0] || "plans";
+}
+
+function legacyHashPage() {
+  const page = location.hash.replace(/^#/, "");
+  return pageNames.has(page) ? page : null;
+}
+
+function renderPage(page, { animate = false, focusHeading = false, resetScroll = false } = {}) {
+  const nextPage = pageNames.has(page) ? page : "plans";
+  state.page = nextPage;
+  $$("[data-page]").forEach((view) => {
+    view.getAnimations().forEach((animation) => animation.cancel());
+    view.hidden = view.dataset.page !== nextPage;
+  });
+  $$("[data-page-link]").forEach((item) => {
+    const active = item.dataset.pageLink === nextPage;
     item.classList.toggle("active", active);
     if (active) item.setAttribute("aria-current", "page"); else item.removeAttribute("aria-current");
   });
+  $("#pageHeading").textContent = t(pageRoutes[nextPage].title);
+  $("#newPlanButton").hidden = nextPage !== "plans";
+  const view = $(`[data-page="${nextPage}"]`);
+  if (resetScroll) window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  if (animate && !reduceMotion.matches && view) {
+    pageAnimation = view.animate(
+      [{ opacity: 0, transform: "translateX(8px)" }, { opacity: 1, transform: "translateX(0)" }],
+      { duration: 170, easing: "cubic-bezier(.23, 1, .32, 1)" },
+    );
+  } else {
+    pageAnimation = null;
+  }
+  if (focusHeading) requestAnimationFrame(() => $("#pageHeading").focus({ preventScroll: true }));
+}
+
+function navigateToPage(page, { push = false, animate = false, focusHeading = false, resetScroll = false } = {}) {
+  const nextPage = pageNames.has(page) ? page : "plans";
+  if (push && (state.page !== nextPage || location.pathname !== pageRoutes[nextPage].path)) {
+    history.pushState({ page: nextPage }, "", `${pageRoutes[nextPage].path}${location.search}`);
+  }
+  renderPage(nextPage, { animate, focusHeading, resetScroll });
+  setMenuOpen(false);
+}
+
+function initializeNavigation() {
+  const hashPage = legacyHashPage();
+  const page = hashPage || pageFromPath();
+  if (hashPage) history.replaceState({ page }, "", `${pageRoutes[page].path}${location.search}`);
+  else history.replaceState({ page }, "", `${location.pathname}${location.search}`);
+  state.page = page;
 }
 
 function setMenuOpen(open) {
@@ -170,6 +269,7 @@ async function loadAll() {
     $("#version").textContent = `v${health.version}${rcloneVersion}`;
     document.title = health.site_name;
     $("#siteName").textContent = health.site_name;
+    $("#siteName").title = health.site_name;
     render();
   } catch (error) {
     toast(`${t("loadError")}: ${error.message}`, true);
@@ -232,7 +332,7 @@ function syncNotificationRequirements() {
 
 async function saveNotifications(event) {
   event.preventDefault(); const button = $("#saveNotificationsButton");
-  try { button.disabled = true; state.notifications = await api("/api/notifications", { method: "PUT", body: JSON.stringify({ config: collectNotifications() }) }); $("#notificationError").hidden = true; renderNotifications(); toast(t("notificationSaved")); }
+  try { button.disabled = true; const response = await api("/api/notifications", { method: "PUT", body: JSON.stringify({ config: collectNotifications() }) }); state.notifications = response; clearCandidateResult(); $("#notificationError").hidden = true; renderNotifications(); toast(t("notificationSaved")); }
   catch (error) { $("#notificationError").textContent = error.message; $("#notificationError").hidden = false; }
   finally { button.disabled = false; }
 }
@@ -692,11 +792,17 @@ document.addEventListener("click", async (event) => {
     localStorage.setItem("language", state.language); render();
   }
   if (button.id === "menuButton") setMenuOpen(!document.body.classList.contains("menu-open"));
-  if (button.classList.contains("nav-item")) {
+  if (button.matches("[data-page-link]")) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    location.hash = button.getAttribute("href").slice(1);
-    setMenuOpen(false);
-    updateNavigation();
+    const pointerTriggered = event.detail > 0 && navigationPointer?.link === button;
+    navigationPointer = null;
+    navigateToPage(button.dataset.pageLink, {
+      push: true,
+      animate: pointerTriggered,
+      focusHeading: !pointerTriggered,
+      resetScroll: true,
+    });
   }
   if (button.id === "refreshButton") loadAll();
   if (["close", "close-log", "close-remote"].includes(action)) {
@@ -731,9 +837,29 @@ document.addEventListener("click", async (event) => {
     input.focus();
   }
   if (action === "select-notification-candidate") {
+    const original = button.textContent;
+    clearCandidateError();
+    showCandidateStatus("applyingConfiguration", "loading");
     button.disabled = true;
-    try { state.notifications = await api("/api/notifications", { method: "PUT", body: JSON.stringify({ candidate_plan_id: button.dataset.id }) }); renderNotifications(); toast(t("notificationSaved")); }
-    catch (error) { toast(error.message, true); } finally { button.disabled = false; }
+    button.dataset.state = "loading";
+    button.textContent = t("applyingConfiguration");
+    try {
+      const response = await api("/api/notifications", { method: "PUT", body: JSON.stringify({ candidate_plan_id: button.dataset.id }) });
+      state.notifications = response;
+      state.notificationMigrationWarnings = response.migration_warnings || [];
+      renderNotifications();
+      renderCandidateResult();
+      toast(t("notificationSaved"));
+    } catch (error) {
+      const errorRegion = $("#notificationCandidateError");
+      $("#notificationCandidateStatus").hidden = true;
+      errorRegion.textContent = error.message;
+      errorRegion.hidden = false;
+      button.disabled = false;
+      delete button.dataset.state;
+      button.textContent = original;
+      toast(error.message, true);
+    }
   }
   if (action === "test-notification") {
     const original = button.textContent;
@@ -765,11 +891,23 @@ function updateArchiveHint() {
 document.addEventListener("click", (event) => {
   if (document.body.classList.contains("menu-open") && !event.target.closest(".sidebar, #menuButton")) setMenuOpen(false);
 });
+document.addEventListener("pointerdown", (event) => {
+  const link = event.target.closest("[data-page-link]");
+  navigationPointer = link ? { link, pointerType: event.pointerType } : null;
+});
 $("#notificationForm").addEventListener("change", syncNotificationRequirements);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && document.body.classList.contains("menu-open")) { setMenuOpen(false); $("#menuButton").focus(); }
 });
-window.addEventListener("hashchange", updateNavigation);
+window.addEventListener("popstate", () => {
+  navigateToPage(pageFromPath(), { animate: false, focusHeading: false, resetScroll: false });
+});
+window.addEventListener("hashchange", () => {
+  const page = legacyHashPage();
+  if (!page) return;
+  history.replaceState({ page }, "", `${pageRoutes[page].path}${location.search}`);
+  navigateToPage(page, { animate: false, focusHeading: false, resetScroll: false });
+});
 $("#planForm").addEventListener("submit", savePlan);
 $("#remoteForm").addEventListener("submit", saveRemote);
 $("#notificationForm").addEventListener("submit", saveNotifications);
@@ -786,6 +924,7 @@ $$("dialog").forEach((dialog) => dialog.addEventListener("click", (event) => {
   if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
 }));
 
+initializeNavigation();
 applyPreferences();
 syncNotificationRequirements();
 loadAll();

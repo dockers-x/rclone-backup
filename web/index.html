@@ -30,12 +30,12 @@
 
   <div class="app-shell">
     <aside class="sidebar" id="primarySidebar" aria-label="Primary">
-      <div class="brand"><span class="brand-mark"><svg><use href="#i-drive"/></svg></span><span><strong id="siteName">{{SITE_NAME}}</strong><small>BACKUP CONTROL</small></span></div>
+      <div class="brand"><span class="brand-mark"><svg><use href="#i-drive"/></svg></span><span><strong id="siteName" title="{{SITE_NAME}}">{{SITE_NAME}}</strong><small>BACKUP CONTROL</small></span></div>
       <nav>
-        <a class="nav-item active" href="#plans"><svg><use href="#i-drive"/></svg><span data-i18n="plans">备份方案</span></a>
-        <a class="nav-item" href="#accounts"><svg><use href="#i-globe"/></svg><span data-i18n="storageAccounts">存储账号</span></a>
-        <a class="nav-item" href="#notifications"><svg><use href="#i-bell"/></svg><span data-i18n="notifications">通知配置</span></a>
-        <a class="nav-item" href="#history"><svg><use href="#i-history"/></svg><span data-i18n="history">运行历史</span></a>
+        <a class="nav-item active" href="/plans" data-page-link="plans"><svg><use href="#i-drive"/></svg><span data-i18n="plans">备份方案</span></a>
+        <a class="nav-item" href="/accounts" data-page-link="accounts"><svg><use href="#i-globe"/></svg><span data-i18n="storageAccounts">存储账号</span></a>
+        <a class="nav-item" href="/notifications" data-page-link="notifications"><svg><use href="#i-bell"/></svg><span data-i18n="notifications">通知配置</span></a>
+        <a class="nav-item" href="/history" data-page-link="history"><svg><use href="#i-history"/></svg><span data-i18n="history">运行历史</span></a>
       </nav>
       <div class="sidebar-foot"><span class="status-dot"></span><span data-i18n="serviceOnline">服务在线</span><small id="version">v2.0.1</small></div>
     </aside>
@@ -43,7 +43,7 @@
     <div class="workspace">
       <header class="topbar">
         <button class="icon-button mobile-menu" id="menuButton" aria-label="打开菜单" aria-controls="primarySidebar" aria-expanded="false"><svg><use href="#i-menu"/></svg></button>
-        <div><p class="eyebrow" data-i18n="workspace">工作空间</p><h1 data-i18n="dashboard">备份控制台</h1></div>
+        <div><p class="eyebrow" data-i18n="workspace">工作空间</p><h1 id="pageHeading" tabindex="-1">备份方案</h1></div>
         <div class="top-actions">
           <button class="icon-button" id="themeButton" data-tooltip="切换主题" aria-label="切换主题"><svg><use href="#i-sun"/></svg></button>
           <button class="language-button" id="languageButton" aria-label="Switch language"><svg><use href="#i-globe"/></svg><span>中文</span></button>
@@ -52,43 +52,50 @@
       </header>
 
       <main id="main">
-        <section class="readiness-banner" id="readinessBanner" hidden>
-          <div class="readiness-icon"><svg><use href="#i-drive"/></svg></div>
-          <div><strong data-i18n="rcloneWaiting">等待配置存储</strong><p data-i18n="rcloneWaitingHint">服务会保持运行，但在检测到至少一个 rclone 远端前不会启动任何备份任务。</p></div>
-          <button class="button primary" id="configureRemoteButton" data-i18n="configureStorage">配置存储</button>
-        </section>
-        <section class="hero" aria-labelledby="page-title">
-          <div><p class="eyebrow" data-i18n="overview">运行概览</p><h2 id="page-title" data-i18n="allBackups">所有备份，一目了然</h2><p data-i18n="subtitle">编排本地目录备份，通过 rclone 安全同步到任意远端。</p></div>
-          <div class="hero-status"><span class="pulse"></span><span data-i18n="schedulerActive">调度器正在运行</span></div>
-        </section>
+        <div class="page-view" data-page="plans">
+          <section class="readiness-banner" id="readinessBanner" hidden>
+            <div class="readiness-icon"><svg><use href="#i-drive"/></svg></div>
+            <div><strong data-i18n="rcloneWaiting">等待配置存储</strong><p data-i18n="rcloneWaitingHint">服务会保持运行，但在检测到至少一个 rclone 远端前不会启动任何备份任务。</p></div>
+            <button class="button primary" id="configureRemoteButton" data-i18n="configureStorage">配置存储</button>
+          </section>
+          <section class="hero" aria-labelledby="page-title">
+            <div><p class="eyebrow" data-i18n="overview">运行概览</p><h2 id="page-title" data-i18n="allBackups">所有备份，一目了然</h2><p data-i18n="subtitle">编排本地目录备份，通过 rclone 安全同步到任意远端。</p></div>
+            <div class="hero-status"><span class="pulse"></span><span data-i18n="schedulerActive">调度器正在运行</span></div>
+          </section>
 
-        <section class="metrics" aria-label="Metrics">
-          <article class="metric"><span data-i18n="activePlans">启用方案</span><strong id="activeCount">—</strong><small data-i18n="automatic">自动调度</small></article>
-          <article class="metric"><span data-i18n="last24">近 24 小时</span><strong id="successCount">—</strong><small data-i18n="successRuns">次成功运行</small></article>
-          <article class="metric"><span data-i18n="successRate">成功率</span><strong id="successRate">—</strong><small data-i18n="recentRuns">最近运行</small></article>
-          <article class="metric"><span data-i18n="destinations">远端目标</span><strong id="remoteCount">—</strong><small>rclone</small></article>
-        </section>
+          <section class="metrics" aria-label="Metrics">
+            <article class="metric"><span data-i18n="activePlans">启用方案</span><strong id="activeCount">—</strong><small data-i18n="automatic">自动调度</small></article>
+            <article class="metric"><span data-i18n="last24">近 24 小时</span><strong id="successCount">—</strong><small data-i18n="successRuns">次成功运行</small></article>
+            <article class="metric"><span data-i18n="successRate">成功率</span><strong id="successRate">—</strong><small data-i18n="recentRuns">最近运行</small></article>
+            <article class="metric"><span data-i18n="destinations">远端目标</span><strong id="remoteCount">—</strong><small>rclone</small></article>
+          </section>
 
-        <section class="section-block" id="plans">
-          <div class="section-heading"><div><p class="eyebrow" data-i18n="configuration">配置</p><h2 data-i18n="backupPlans">备份方案</h2></div><span class="count-chip" id="planCount">0</span></div>
-          <div class="plan-grid" id="planGrid" aria-live="polite">
-            <div class="skeleton"></div><div class="skeleton"></div>
-          </div>
-          <div class="empty-state" id="emptyPlans" hidden><span class="empty-icon"><svg><use href="#i-drive"/></svg></span><h3 data-i18n="noPlans">还没有备份方案</h3><p data-i18n="noPlansHint">创建第一个方案，选择数据源、远端目标和重试策略。</p><button class="button primary" data-action="new"><svg><use href="#i-plus"/></svg><span data-i18n="createPlan">创建方案</span></button></div>
-        </section>
+          <section class="section-block" id="plans">
+            <div class="section-heading"><div><p class="eyebrow" data-i18n="configuration">配置</p><h2 data-i18n="backupPlans">备份方案</h2></div><span class="count-chip" id="planCount">0</span></div>
+            <div class="plan-grid" id="planGrid" aria-live="polite">
+              <div class="skeleton"></div><div class="skeleton"></div>
+            </div>
+            <div class="empty-state" id="emptyPlans" hidden><span class="empty-icon"><svg><use href="#i-drive"/></svg></span><h3 data-i18n="noPlans">还没有备份方案</h3><p data-i18n="noPlansHint">创建第一个方案，选择数据源、远端目标和重试策略。</p><button class="button primary" data-action="new"><svg><use href="#i-plus"/></svg><span data-i18n="createPlan">创建方案</span></button></div>
+          </section>
+        </div>
 
-        <section class="section-block" id="accounts">
-          <div class="section-heading"><div><p class="eyebrow">RCLONE CONFIG</p><h2 data-i18n="storageAccounts">存储账号</h2></div><button class="button ghost" id="addAccountButton"><svg><use href="#i-plus"/></svg><span data-i18n="addAccount">添加账号</span></button></div>
-          <p class="section-copy" data-i18n="accountBoundary">账号和密钥只保存在 rclone 配置文件中；备份数据库仅引用别名。</p>
-          <div class="account-grid" id="accountGrid"></div>
-          <div class="empty-state" id="emptyAccounts" hidden><span class="empty-icon"><svg><use href="#i-globe"/></svg></span><h3 data-i18n="noAccounts">还没有存储账号</h3><p data-i18n="noAccountsHint">添加一个 rclone 远端，连接 S3、WebDAV、SFTP 或其他提供商。</p><button class="button primary" data-action="configure-storage" data-i18n="configureStorage">配置存储</button></div>
-        </section>
+        <div class="page-view" data-page="accounts" hidden>
+          <section class="section-block" id="accounts">
+            <div class="section-heading"><div><p class="eyebrow">RCLONE CONFIG</p><h2 data-i18n="storageAccounts">存储账号</h2></div><button class="button ghost" id="addAccountButton"><svg><use href="#i-plus"/></svg><span data-i18n="addAccount">添加账号</span></button></div>
+            <p class="section-copy" data-i18n="accountBoundary">账号和密钥只保存在 rclone 配置文件中；备份数据库仅引用别名。</p>
+            <div class="account-grid" id="accountGrid"></div>
+            <div class="empty-state" id="emptyAccounts" hidden><span class="empty-icon"><svg><use href="#i-globe"/></svg></span><h3 data-i18n="noAccounts">还没有存储账号</h3><p data-i18n="noAccountsHint">添加一个 rclone 远端，连接 S3、WebDAV、SFTP 或其他提供商。</p><button class="button primary" data-action="configure-storage" data-i18n="configureStorage">配置存储</button></div>
+          </section>
+        </div>
 
-        <section class="section-block" id="notifications">
-          <div class="section-heading"><div><p class="eyebrow" data-i18n="globalSettings">全局设置</p><h2 data-i18n="notifications">通知配置</h2></div><span class="badge disabled" id="notificationState" data-i18n="notConfigured">未配置</span></div>
-          <p class="section-copy" data-i18n="globalNotificationHint">所有手动与定时备份共用这一套通知配置。</p>
-          <div class="migration-notice" id="notificationConflict" role="status" hidden></div>
-          <form id="notificationForm" class="notification-panel">
+        <div class="page-view" data-page="notifications" hidden>
+          <section class="section-block" id="notifications">
+            <div class="section-heading"><div><p class="eyebrow" data-i18n="globalSettings">全局设置</p><h2 data-i18n="notifications">通知配置</h2></div><span class="badge disabled" id="notificationState" data-i18n="notConfigured">未配置</span></div>
+            <p class="section-copy" data-i18n="globalNotificationHint">所有手动与定时备份共用这一套通知配置。</p>
+            <div class="migration-notice" id="notificationConflict" role="status" hidden></div>
+            <div class="candidate-feedback" id="notificationCandidateStatus" role="status" hidden></div>
+            <div class="form-error candidate-error" id="notificationCandidateError" role="alert" hidden></div>
+            <form id="notificationForm" class="notification-panel">
             <div class="form-error" id="notificationError" role="alert" hidden></div>
             <article class="channel-card">
               <header><div class="channel-icon"><svg><use href="#i-globe"/></svg></div><div><h3>Ping</h3><p data-i18n="pingHint">向健康检查或 Webhook URL 报告备份事件</p></div><label class="compact-switch"><input type="checkbox" name="ping_enabled"><i></i><span class="sr-only" data-i18n="enablePing">启用 Ping</span></label></header>
@@ -119,13 +126,16 @@
               <footer><button class="button ghost" type="button" data-action="test-notification" data-channel="serverchan"><span data-i18n="sendTest">发送测试</span></button></footer>
             </article>
             <div class="notification-actions"><p id="notificationSavedAt" aria-live="polite"></p><button class="button primary" id="saveNotificationsButton" type="submit" data-i18n="saveNotifications">保存通知配置</button></div>
-          </form>
-        </section>
+            </form>
+          </section>
+        </div>
 
-        <section class="section-block" id="history">
-          <div class="section-heading"><div><p class="eyebrow" data-i18n="activity">活动</p><h2 data-i18n="recentHistory">最近运行</h2></div><button class="button ghost" id="refreshButton" data-i18n="refresh">刷新</button></div>
-          <div class="history-card"><div class="history-table" id="historyList"><div class="skeleton row"></div></div></div>
-        </section>
+        <div class="page-view" data-page="history" hidden>
+          <section class="section-block" id="history">
+            <div class="section-heading"><div><p class="eyebrow" data-i18n="activity">活动</p><h2 data-i18n="recentHistory">最近运行</h2></div><button class="button ghost" id="refreshButton" data-i18n="refresh">刷新</button></div>
+            <div class="history-card"><div class="history-table" id="historyList"><div class="skeleton row"></div></div></div>
+          </section>
+        </div>
       </main>
     </div>
   </div>

@@ -279,6 +279,12 @@ impl NotificationConfig {
 
     pub fn validate(&self) -> Result<(), String> {
         self.ping.validate()?;
+        self.validate_mail()?;
+        self.validate_serverchan()?;
+        Ok(())
+    }
+
+    fn validate_mail(&self) -> Result<(), String> {
         if self.mail.to.chars().count() > 320 || self.mail.smtp_options.len() > 64 {
             return Err("SMTP notification configuration is too large".into());
         }
@@ -297,6 +303,10 @@ impl NotificationConfig {
             return Err("at least one SMTP event is required when SMTP is enabled".into());
         }
         validate_mail_options(&self.mail.smtp_options)?;
+        Ok(())
+    }
+
+    fn validate_serverchan(&self) -> Result<(), String> {
         if self.serverchan.send_key.chars().count() > 256
             || self.serverchan.send_key.contains(['\0', '\r', '\n'])
         {
@@ -314,6 +324,43 @@ impl NotificationConfig {
                 "at least one ServerChan event is required when ServerChan is enabled".into(),
             );
         }
+        Ok(())
+    }
+
+    pub async fn isolate_migration_channels(mut self) -> (Self, Vec<NotificationMigrationWarning>) {
+        let mut config = Self::default();
+        let mut warnings = Vec::new();
+        let mail_normalization = self.normalize_legacy_mail();
+
+        match self.ping.validate() {
+            Ok(()) => match validate_ping_network_targets(&self.ping).await {
+                Ok(()) => config.ping = self.ping.clone(),
+                Err(reason) => warnings.push(NotificationMigrationWarning::new("ping", reason)),
+            },
+            Err(reason) => warnings.push(NotificationMigrationWarning::new("ping", reason)),
+        }
+
+        let mail_result = mail_normalization.and_then(|_| self.validate_mail());
+        match mail_result {
+            Ok(()) => match validate_mail_network_target(&self.mail).await {
+                Ok(()) => config.mail = self.mail.clone(),
+                Err(reason) => warnings.push(NotificationMigrationWarning::new("mail", reason)),
+            },
+            Err(reason) => warnings.push(NotificationMigrationWarning::new("mail", reason)),
+        }
+
+        match self.validate_serverchan() {
+            Ok(()) => config.serverchan = self.serverchan.clone(),
+            Err(reason) => {
+                warnings.push(NotificationMigrationWarning::new("serverchan", reason));
+            }
+        }
+
+        (config, warnings)
+    }
+
+    pub fn normalize_legacy_mail(&mut self) -> Result<(), String> {
+        self.mail.smtp_options = normalize_legacy_mail_options(&self.mail.smtp_options)?;
         Ok(())
     }
 
@@ -385,21 +432,92 @@ impl NotificationConfig {
     }
 
     pub async fn validate_network_targets(&self) -> Result<(), String> {
-        for value in [
-            &self.ping.completion_url,
-            &self.ping.start_url,
-            &self.ping.success_url,
-            &self.ping.failure_url,
-        ] {
-            if !value.is_empty() {
-                validate_public_url(value, "Ping").await?;
-            }
-        }
-        if let Some(server) = smtp_server_from_options(&self.mail.smtp_options) {
-            validate_public_url(server, "SMTP").await?;
-        }
+        validate_ping_network_targets(&self.ping).await?;
+        validate_mail_network_target(&self.mail).await?;
         Ok(())
     }
+}
+
+fn normalize_legacy_mail_options(options: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    let mut index = 0;
+    while index < options.len() {
+        let value = if options[index] == "-S" {
+            index += 1;
+            options
+                .get(index)
+                .map(String::as_str)
+                .ok_or_else(|| "SMTP option is missing its value".to_owned())?
+        } else {
+            options[index]
+                .strip_prefix("-S")
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "SMTP options may only set supported SMTP variables".to_owned())?
+        };
+
+        let converted = match value {
+            "v15-compat" | "smtp-use-starttls" => None,
+            _ => {
+                let (name, setting) = value
+                    .split_once('=')
+                    .ok_or_else(|| "SMTP variable must use name=value".to_owned())?;
+                match name {
+                    "smtp-auth" if setting.eq_ignore_ascii_case("login") => None,
+                    "user" => Some(format!("smtp-auth-user={setting}")),
+                    "password" => Some(format!("smtp-auth-password={setting}")),
+                    "from" => Some(format!(
+                        "from={}",
+                        legacy_mail_address(setting).ok_or_else(|| {
+                            "SMTP from address must be one email address".to_owned()
+                        })?
+                    )),
+                    "mta" | "smtp" | "smtp-auth-user" | "smtp-auth-password" => {
+                        Some(value.to_owned())
+                    }
+                    _ => return Err("SMTP variable is not allowed".into()),
+                }
+            }
+        };
+        if let Some(value) = converted {
+            normalized.extend(["-S".to_owned(), value]);
+        }
+        index += 1;
+    }
+    validate_mail_options(&normalized)?;
+    Ok(normalized)
+}
+
+fn legacy_mail_address(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if validate_mail_address(value, "SMTP from address").is_ok() {
+        return Some(value);
+    }
+    let (_, rest) = value.rsplit_once('<')?;
+    let address = rest.strip_suffix('>')?.trim();
+    validate_mail_address(address, "SMTP from address")
+        .is_ok()
+        .then_some(address)
+}
+
+async fn validate_ping_network_targets(ping: &PingConfig) -> Result<(), String> {
+    for value in [
+        &ping.completion_url,
+        &ping.start_url,
+        &ping.success_url,
+        &ping.failure_url,
+    ] {
+        if !value.is_empty() {
+            validate_public_url(value, "Ping").await?;
+        }
+    }
+    Ok(())
+}
+
+async fn validate_mail_network_target(mail: &MailConfig) -> Result<(), String> {
+    if let Some(server) = smtp_server_from_options(&mail.smtp_options) {
+        validate_public_url(server, "SMTP").await?;
+    }
+    Ok(())
 }
 
 pub(crate) fn smtp_server_from_options(options: &[String]) -> Option<&str> {
@@ -621,6 +739,21 @@ pub struct NotificationCandidate {
     pub config: NotificationConfig,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NotificationMigrationWarning {
+    pub channel: String,
+    pub reason: String,
+}
+
+impl NotificationMigrationWarning {
+    fn new(channel: &str, reason: String) -> Self {
+        Self {
+            channel: channel.into(),
+            reason,
+        }
+    }
+}
+
 fn validate_options_shape(options: &[String], channel: &str) -> Result<(), String> {
     if options.len() > 64
         || options
@@ -667,22 +800,36 @@ fn validate_ping_options(options: &[String]) -> Result<(), String> {
 
 fn validate_mail_options(options: &[String]) -> Result<(), String> {
     validate_options_shape(options, "SMTP")?;
+    let mut variables = std::collections::HashSet::new();
     let mut index = 0;
     while index < options.len() {
         let option = &options[index];
-        if option == "-S" {
+        let value = if option == "-S" {
             if index + 1 >= options.len() || options[index + 1].starts_with('-') {
                 return Err("SMTP option is missing its value".into());
             }
-            validate_mail_variable(&options[index + 1])?;
+            let value = options[index + 1].as_str();
             index += 2;
+            value
         } else if let Some(value) = option.strip_prefix("-S")
             && !value.is_empty()
         {
-            validate_mail_variable(value)?;
             index += 1;
+            value
         } else {
             return Err("SMTP options may only set supported SMTP variables".into());
+        };
+        validate_mail_variable(value)?;
+        let (name, _) = value
+            .split_once('=')
+            .expect("validated SMTP variables always use name=value");
+        let name = if matches!(name, "mta" | "smtp") {
+            "smtp-server"
+        } else {
+            name
+        };
+        if !variables.insert(name) {
+            return Err("SMTP variables may only be set once".into());
         }
     }
     Ok(())
@@ -931,6 +1078,67 @@ mod tests {
         assert!(config.validate().unwrap_err().contains("one email"));
     }
 
+    #[test]
+    fn ordinary_validation_does_not_apply_legacy_mail_conversion() {
+        let mut config = NotificationConfig::default();
+        config.mail.enabled = true;
+        config.mail.to = "receiver@example.com".into();
+        config.mail.smtp_options = vec![
+            "-S".into(),
+            "v15-compat".into(),
+            "-S".into(),
+            "mta=smtp://smtp.example:587".into(),
+            "-S".into(),
+            "from=sender@example.com".into(),
+        ];
+
+        assert!(config.validate().unwrap_err().contains("name=value"));
+    }
+
+    #[test]
+    fn smtp_validation_rejects_duplicate_variables_and_server_aliases() {
+        let mut config = NotificationConfig::default();
+        config.mail.smtp_options = vec![
+            "-S".into(),
+            "mta=smtp://8.8.8.8:587".into(),
+            "-S".into(),
+            "mta=smtp://127.0.0.1:587".into(),
+        ];
+        assert!(config.validate().unwrap_err().contains("only be set once"));
+
+        config.mail.smtp_options[2..]
+            .clone_from_slice(&["-S".into(), "smtp=smtp://127.0.0.1:587".into()]);
+        assert!(config.validate().unwrap_err().contains("only be set once"));
+    }
+
+    #[tokio::test]
+    async fn migration_isolates_ambiguous_smtp_without_dropping_other_channels() {
+        let mut legacy = NotificationConfig::default();
+        legacy.ping.enabled = true;
+        legacy.ping.success_url = "https://8.8.8.8/backup-ok".into();
+        legacy.mail.enabled = true;
+        legacy.mail.to = "receiver@example.com".into();
+        legacy.mail.smtp_options = vec![
+            "-S".into(),
+            "mta=smtp://8.8.8.8:587".into(),
+            "-S".into(),
+            "mta=smtp://127.0.0.1:587".into(),
+            "-S".into(),
+            "from=sender@example.com".into(),
+        ];
+        legacy.serverchan.enabled = true;
+        legacy.serverchan.send_key = "SCTexample".into();
+
+        let (isolated, warnings) = legacy.isolate_migration_channels().await;
+
+        assert!(isolated.ping.enabled);
+        assert_eq!(isolated.mail, MailConfig::default());
+        assert!(isolated.serverchan.enabled);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].channel, "mail");
+        assert!(warnings[0].reason.contains("only be set once"));
+    }
+
     #[tokio::test]
     async fn notification_targets_reject_local_networks() {
         let mut config = NotificationConfig::default();
@@ -944,6 +1152,50 @@ mod tests {
         );
         config.ping.success_url = "http://169.254.169.254/latest/meta-data".into();
         assert!(config.validate_network_targets().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn migration_isolates_invalid_mail_without_dropping_other_channels() {
+        let mut legacy = NotificationConfig::default();
+        legacy.ping.enabled = true;
+        legacy.ping.success_url = "https://8.8.8.8/backup-ok".into();
+        legacy.mail.enabled = true;
+        legacy.mail.to = "receiver@example.com".into();
+        legacy.mail.smtp_options = vec![
+            "-S".into(),
+            "mta=smtp://8.8.8.8:587".into(),
+            "-S".into(),
+            "unsupported-legacy-switch".into(),
+        ];
+        legacy.serverchan.enabled = true;
+        legacy.serverchan.send_key = "SCTexample".into();
+
+        let (isolated, warnings) = legacy.isolate_migration_channels().await;
+
+        assert!(isolated.ping.enabled);
+        assert_eq!(isolated.ping.success_url, "https://8.8.8.8/backup-ok");
+        assert_eq!(isolated.mail, MailConfig::default());
+        assert!(isolated.serverchan.enabled);
+        assert_eq!(isolated.serverchan.send_key, "SCTexample");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].channel, "mail");
+        assert!(!warnings[0].reason.is_empty());
+    }
+
+    #[tokio::test]
+    async fn migration_drops_a_ping_channel_with_a_private_target() {
+        let mut legacy = NotificationConfig::default();
+        legacy.ping.enabled = true;
+        legacy.ping.success_url = "http://127.0.0.1/private".into();
+        legacy.serverchan.enabled = true;
+        legacy.serverchan.send_key = "SCTexample".into();
+
+        let (isolated, warnings) = legacy.isolate_migration_channels().await;
+
+        assert_eq!(isolated.ping, PingConfig::default());
+        assert!(isolated.serverchan.enabled);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].channel, "ping");
     }
 
     #[test]

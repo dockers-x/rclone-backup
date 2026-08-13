@@ -1,5 +1,8 @@
 use crate::{
-    model::{GlobalNotificationSettings, NotificationConfig, Plan, PlanInput, REDACTED, RunRecord},
+    model::{
+        GlobalNotificationSettings, NotificationConfig, NotificationMigrationWarning, Plan,
+        PlanInput, REDACTED, RunRecord,
+    },
     runner::Runner,
     store::Store,
 };
@@ -31,9 +34,12 @@ pub struct AppState {
     pub site_name: String,
 }
 
+const FRONTEND_ROUTES: &[&str] = &["/", "/plans", "/accounts", "/notifications", "/history"];
+
 pub fn router(state: AppState) -> Router {
-    let protected = Router::new()
-        .route("/", get(index))
+    let protected = FRONTEND_ROUTES
+        .iter()
+        .fold(Router::new(), |router, path| router.route(path, get(index)))
         .route("/app.css", get(css))
         .route("/app.js", get(js))
         .route("/api/docs", get(api_docs))
@@ -566,6 +572,13 @@ struct NotificationTestInput {
     config: Option<NotificationConfig>,
 }
 
+#[derive(Serialize)]
+struct NotificationUpdateResponse {
+    #[serde(flatten)]
+    settings: GlobalNotificationSettings,
+    migration_warnings: Vec<NotificationMigrationWarning>,
+}
+
 async fn get_notifications(
     State(state): State<AppState>,
 ) -> ApiResult<Json<GlobalNotificationSettings>> {
@@ -577,30 +590,31 @@ async fn get_notifications(
 async fn update_notifications(
     State(state): State<AppState>,
     Json(input): Json<NotificationUpdate>,
-) -> ApiResult<Json<GlobalNotificationSettings>> {
+) -> ApiResult<Json<NotificationUpdateResponse>> {
     if input.config.is_some() == input.candidate_plan_id.is_some() {
         return Err(ApiError::validation(
             "provide either config or candidate_plan_id".into(),
         ));
     }
     let existing = state.store.notification_settings().await?;
-    let config = if let Some(candidate_id) = input.candidate_plan_id {
-        existing
+    let (config, migration_warnings) = if let Some(candidate_id) = input.candidate_plan_id {
+        let candidate = existing
             .candidates
             .iter()
             .find(|candidate| candidate.plan_id == candidate_id)
             .map(|candidate| candidate.config.clone())
-            .ok_or_else(|| ApiError::validation("notification candidate not found".into()))?
+            .ok_or_else(|| ApiError::validation("notification candidate not found".into()))?;
+        candidate.isolate_migration_channels().await
     } else {
         let mut config = input.config.expect("checked above");
         config.merge_redacted_from(&existing.config);
+        config.validate().map_err(ApiError::validation)?;
         config
+            .validate_network_targets()
+            .await
+            .map_err(ApiError::validation)?;
+        (config, Vec::new())
     };
-    config.validate().map_err(ApiError::validation)?;
-    config
-        .validate_network_targets()
-        .await
-        .map_err(ApiError::validation)?;
     let mut settings = GlobalNotificationSettings {
         confirmed: true,
         config,
@@ -609,7 +623,10 @@ async fn update_notifications(
     };
     state.store.save_notification_settings(&settings).await?;
     redact_notification_settings(&mut settings);
-    Ok(Json(settings))
+    Ok(Json(NotificationUpdateResponse {
+        settings,
+        migration_warnings,
+    }))
 }
 
 async fn test_notification(
@@ -756,8 +773,13 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{redact_notification_config, remote_needs_input, same_origin_or_non_browser};
-    use crate::model::{NotificationConfig, REDACTED};
+    use super::{
+        FRONTEND_ROUTES, NotificationUpdateResponse, redact_notification_config,
+        remote_needs_input, same_origin_or_non_browser,
+    };
+    use crate::model::{
+        GlobalNotificationSettings, NotificationConfig, NotificationMigrationWarning, REDACTED,
+    };
     use axum::http::{HeaderMap, HeaderValue, header};
     use serde_json::json;
 
@@ -769,6 +791,14 @@ mod tests {
             "Result": "",
             "Error": ""
         })));
+    }
+
+    #[test]
+    fn frontend_history_routes_share_the_index_registration() {
+        assert_eq!(
+            FRONTEND_ROUTES,
+            ["/", "/plans", "/accounts", "/notifications", "/history"]
+        );
     }
 
     #[test]
@@ -823,5 +853,25 @@ mod tests {
         let mut public = stored.clone();
         redact_notification_config(&mut public);
         assert_eq!(public.mail.smtp_options, vec![REDACTED]);
+    }
+
+    #[test]
+    fn notification_update_response_includes_structured_migration_warnings() {
+        let response = NotificationUpdateResponse {
+            settings: GlobalNotificationSettings::default(),
+            migration_warnings: vec![NotificationMigrationWarning {
+                channel: "mail".into(),
+                reason: "SMTP variable is not allowed".into(),
+            }],
+        };
+
+        let value = serde_json::to_value(response).unwrap();
+
+        assert_eq!(value["migration_warnings"][0]["channel"], "mail");
+        assert_eq!(
+            value["migration_warnings"][0]["reason"],
+            "SMTP variable is not allowed"
+        );
+        assert!(value.get("config").is_some());
     }
 }
