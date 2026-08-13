@@ -1,5 +1,5 @@
 use crate::{
-    model::{Plan, PlanInput, REDACTED, RunRecord},
+    model::{GlobalNotificationSettings, NotificationConfig, Plan, PlanInput, REDACTED, RunRecord},
     runner::Runner,
     store::Store,
 };
@@ -28,6 +28,7 @@ pub struct AppState {
     pub store: Store,
     pub runner: Runner,
     pub public_auth: Option<(String, String)>,
+    pub site_name: String,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -54,6 +55,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/plans", get(list_plans).post(create_plan))
         .route("/api/plans/{id}", put(update_plan).delete(delete_plan))
         .route("/api/plans/{id}/run", post(run_plan))
+        .route(
+            "/api/notifications",
+            get(get_notifications).put(update_notifications),
+        )
+        .route("/api/notifications/test", post(test_notification))
         .route("/api/runs", get(list_runs))
         .fallback(not_found)
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
@@ -73,11 +79,14 @@ pub fn router(state: AppState) -> Router {
         ))
 }
 
-async fn index() -> impl IntoResponse {
-    static_asset(
-        include_str!("../web/index.html"),
-        "text/html; charset=utf-8",
-    )
+async fn index(State(state): State<AppState>) -> impl IntoResponse {
+    let html =
+        include_str!("../web/index.html").replace("{{SITE_NAME}}", &escape_html(&state.site_name));
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(Body::from(html))
+        .unwrap()
 }
 async fn css() -> impl IntoResponse {
     static_asset(include_str!("../web/app.css"), "text/css; charset=utf-8")
@@ -91,7 +100,7 @@ async fn js() -> impl IntoResponse {
 fn static_asset(content: &'static str, content_type: &'static str) -> Response {
     Response::builder()
         .header(header::CONTENT_TYPE, content_type)
-        .header(header::CACHE_CONTROL, "public, max-age=3600")
+        .header(header::CACHE_CONTROL, "no-cache")
         .body(Body::from(content))
         .unwrap()
 }
@@ -100,14 +109,38 @@ fn static_asset(content: &'static str, content_type: &'static str) -> Response {
 struct Health {
     status: &'static str,
     version: &'static str,
+    site_name: String,
     time: chrono::DateTime<Utc>,
 }
-async fn health() -> Json<Health> {
+async fn health(State(state): State<AppState>) -> Json<Health> {
     Json(Health {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
+        site_name: state.site_name,
         time: Utc::now(),
     })
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::escape_html;
+
+    #[test]
+    fn site_name_is_html_escaped() {
+        assert_eq!(
+            escape_html("Backup <home> & \"cloud\""),
+            "Backup &lt;home&gt; &amp; &quot;cloud&quot;"
+        );
+    }
 }
 
 #[derive(Serialize)]
@@ -410,6 +443,11 @@ async fn openapi() -> impl IntoResponse {
                 "delete": { "summary": "Delete a backup plan", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" }}], "responses": { "204": { "description": "Deleted" }}}
             },
             "/api/plans/{id}/run": { "post": { "summary": "Run a plan now", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" }}], "responses": { "202": { "description": "Accepted" }, "409": { "description": "Rclone not ready or plan already running" }}}},
+            "/api/notifications": {
+                "get": { "summary": "Read masked global notification settings", "responses": { "200": { "description": "Settings and migration candidates" }}},
+                "put": { "summary": "Save or confirm global notification settings", "responses": { "200": { "description": "Saved" }, "422": { "description": "Validation error" }}}
+            },
+            "/api/notifications/test": { "post": { "summary": "Send a channel test using global notification settings", "responses": { "200": { "description": "Delivered" }, "422": { "description": "Validation or delivery error" }}}},
             "/api/runs": { "get": { "summary": "List persistent run history", "responses": { "200": { "description": "Runs" }}}}
         }
     }))
@@ -432,8 +470,9 @@ async fn list_plans(State(state): State<AppState>) -> ApiResult<Json<Vec<Plan>>>
 
 async fn create_plan(
     State(state): State<AppState>,
-    Json(input): Json<PlanInput>,
+    Json(mut input): Json<PlanInput>,
 ) -> ApiResult<(StatusCode, Json<Plan>)> {
+    input.notifications = NotificationConfig::default();
     input.validate().map_err(ApiError::validation)?;
     ensure_plan_aliases(&state, &input).await?;
     let now = Utc::now();
@@ -456,6 +495,7 @@ async fn update_plan(
         .get_plan(id)
         .await?
         .ok_or_else(ApiError::not_found)?;
+    input.notifications.clone_from(&existing.notifications);
     merge_redacted_secrets(&mut input, &existing);
     let mut plan = input.into_plan(id, existing.created_at);
     plan.updated_at = Utc::now();
@@ -509,18 +549,131 @@ async fn list_runs(
     ))
 }
 
+#[derive(Deserialize)]
+struct NotificationUpdate {
+    #[serde(default)]
+    config: Option<NotificationConfig>,
+    #[serde(default)]
+    candidate_plan_id: Option<Uuid>,
+}
+
+#[derive(Deserialize)]
+struct NotificationTestInput {
+    channel: String,
+    #[serde(default)]
+    config: Option<NotificationConfig>,
+}
+
+async fn get_notifications(
+    State(state): State<AppState>,
+) -> ApiResult<Json<GlobalNotificationSettings>> {
+    let mut settings = state.store.notification_settings().await?;
+    redact_notification_settings(&mut settings);
+    Ok(Json(settings))
+}
+
+async fn update_notifications(
+    State(state): State<AppState>,
+    Json(input): Json<NotificationUpdate>,
+) -> ApiResult<Json<GlobalNotificationSettings>> {
+    if input.config.is_some() == input.candidate_plan_id.is_some() {
+        return Err(ApiError::validation(
+            "provide either config or candidate_plan_id".into(),
+        ));
+    }
+    let existing = state.store.notification_settings().await?;
+    let config = if let Some(candidate_id) = input.candidate_plan_id {
+        existing
+            .candidates
+            .iter()
+            .find(|candidate| candidate.plan_id == candidate_id)
+            .map(|candidate| candidate.config.clone())
+            .ok_or_else(|| ApiError::validation("notification candidate not found".into()))?
+    } else {
+        let mut config = input.config.expect("checked above");
+        config.merge_redacted_from(&existing.config);
+        config
+    };
+    config.validate().map_err(ApiError::validation)?;
+    config
+        .validate_network_targets()
+        .await
+        .map_err(ApiError::validation)?;
+    let mut settings = GlobalNotificationSettings {
+        confirmed: true,
+        config,
+        candidates: Vec::new(),
+        updated_at: Utc::now(),
+    };
+    state.store.save_notification_settings(&settings).await?;
+    redact_notification_settings(&mut settings);
+    Ok(Json(settings))
+}
+
+async fn test_notification(
+    State(state): State<AppState>,
+    Json(input): Json<NotificationTestInput>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if !matches!(input.channel.as_str(), "ping" | "mail" | "serverchan") {
+        return Err(ApiError::validation("unknown notification channel".into()));
+    }
+    let existing = state.store.notification_settings().await?;
+    let mut config = input.config.unwrap_or_else(|| existing.config.clone());
+    config.merge_redacted_from(&existing.config);
+    config.validate().map_err(ApiError::validation)?;
+    config
+        .validate_network_targets()
+        .await
+        .map_err(ApiError::validation)?;
+    state
+        .runner
+        .test_notification(&config, &input.channel)
+        .await
+        .map_err(|_| ApiError::validation("notification test failed".into()))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 fn redact_plan(plan: &mut Plan) {
     if !plan.archive.password.is_empty() {
         plan.archive.password = REDACTED.into();
     }
-    if !plan.notifications.serverchan.send_key.is_empty() {
-        plan.notifications.serverchan.send_key = REDACTED.into();
+    redact_notification_config(&mut plan.notifications);
+}
+
+fn redact_notification_settings(settings: &mut GlobalNotificationSettings) {
+    redact_notification_config(&mut settings.config);
+    for candidate in &mut settings.candidates {
+        redact_notification_config(&mut candidate.config);
     }
-    for value in &mut plan.notifications.mail.smtp_options {
-        if value.contains("password")
-            && let Some((prefix, _)) = value.split_once('=')
-        {
-            *value = format!("{prefix}={REDACTED}");
+}
+
+fn redact_notification_config(config: &mut NotificationConfig) {
+    for url in [
+        &mut config.ping.completion_url,
+        &mut config.ping.start_url,
+        &mut config.ping.success_url,
+        &mut config.ping.failure_url,
+    ] {
+        if !url.is_empty() {
+            *url = REDACTED.into();
+        }
+    }
+    if !config.serverchan.send_key.is_empty() {
+        config.serverchan.send_key = REDACTED.into();
+    }
+    if !config.mail.smtp_options.is_empty() {
+        config.mail.smtp_options.clear();
+        config.mail.smtp_options.push(REDACTED.into());
+    }
+    for values in [
+        &mut config.ping.completion_options,
+        &mut config.ping.start_options,
+        &mut config.ping.success_options,
+        &mut config.ping.failure_options,
+    ] {
+        if !values.is_empty() {
+            values.clear();
+            values.push(REDACTED.into());
         }
     }
 }
@@ -601,7 +754,8 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{remote_needs_input, same_origin_or_non_browser};
+    use super::{redact_notification_config, remote_needs_input, same_origin_or_non_browser};
+    use crate::model::{NotificationConfig, REDACTED};
     use axum::http::{HeaderMap, HeaderValue, header};
     use serde_json::json;
 
@@ -641,5 +795,31 @@ mod tests {
             HeaderValue::from_static("https://attacker.example"),
         );
         assert!(!same_origin_or_non_browser(&headers));
+    }
+
+    #[test]
+    fn notification_secrets_are_masked_and_redacted_values_merge() {
+        let mut stored = NotificationConfig::default();
+        stored.ping.enabled = true;
+        stored.ping.success_url = "https://notify.example/private-token".into();
+        stored.ping.success_options = vec!["--header".into(), "Authorization: Bearer token".into()];
+        stored.mail.smtp_options = vec!["-S".into(), "smtp-auth-password=hunter2".into()];
+        stored.serverchan.send_key = "SCTprivate".into();
+
+        let mut public = stored.clone();
+        redact_notification_config(&mut public);
+        assert_eq!(public.ping.success_url, REDACTED);
+        assert_eq!(public.ping.success_options, vec![REDACTED]);
+        assert_eq!(public.mail.smtp_options, vec![REDACTED]);
+        assert_eq!(public.serverchan.send_key, REDACTED);
+
+        public.merge_redacted_from(&stored);
+        assert_eq!(public, stored);
+
+        stored.mail.smtp_options =
+            vec!["-S".into(), "mta=smtps://alice:hunter2@smtp.example".into()];
+        let mut public = stored.clone();
+        redact_notification_config(&mut public);
+        assert_eq!(public.mail.smtp_options, vec![REDACTED]);
     }
 }

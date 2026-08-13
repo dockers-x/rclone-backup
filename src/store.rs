@@ -1,4 +1,6 @@
-use crate::model::{Plan, RunRecord};
+use crate::model::{
+    GlobalNotificationSettings, NotificationCandidate, NotificationConfig, Plan, RunRecord,
+};
 use aes_gcm::{
     Aes256Gcm, KeyInit,
     aead::{Aead, OsRng, rand_core::RngCore},
@@ -36,6 +38,7 @@ impl Store {
         };
         store.migrate().await?;
         store.encrypt_existing_plans().await?;
+        store.migrate_global_notifications().await?;
         Ok(store)
     }
 
@@ -53,6 +56,11 @@ impl Store {
         .await?;
         sqlx::query("CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL, document TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)").execute(&self.pool).await?;
         sqlx::query("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, plan_name TEXT NOT NULL, trigger TEXT NOT NULL, status TEXT NOT NULL, attempt INTEGER NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, log TEXT NOT NULL DEFAULT '')").execute(&self.pool).await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, document TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        )
+        .execute(&self.pool)
+        .await?;
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_runs_plan_started ON runs(plan_id, started_at DESC)",
         )
@@ -80,6 +88,7 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        self.migrate_global_notifications().await?;
         Ok(true)
     }
 
@@ -115,6 +124,34 @@ impl Store {
             .await?
             .rows_affected()
             > 0)
+    }
+
+    pub async fn notification_settings(&self) -> anyhow::Result<GlobalNotificationSettings> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT document FROM settings WHERE key = 'notifications'")
+                .fetch_optional(&self.pool)
+                .await?;
+        row.map(|(document,)| self.decode_document(&document, "notification settings"))
+            .transpose()
+            .map(|value| value.unwrap_or_default())
+    }
+
+    pub async fn confirmed_notifications(&self) -> anyhow::Result<Option<NotificationConfig>> {
+        let settings = self.notification_settings().await?;
+        Ok(settings.confirmed.then_some(settings.config))
+    }
+
+    pub async fn save_notification_settings(
+        &self,
+        settings: &GlobalNotificationSettings,
+    ) -> anyhow::Result<()> {
+        let document = self.encode_document(settings, "notification settings")?;
+        sqlx::query("INSERT INTO settings(key,document,updated_at) VALUES('notifications',?,?) ON CONFLICT(key) DO UPDATE SET document=excluded.document,updated_at=excluded.updated_at")
+            .bind(document)
+            .bind(settings.updated_at.to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn start_run(&self, plan: &Plan, trigger: &str) -> anyhow::Result<RunRecord> {
@@ -176,13 +213,21 @@ impl Store {
     }
 
     fn encode_plan(&self, plan: &Plan) -> anyhow::Result<String> {
-        let plaintext = serde_json::to_vec(plan)?;
+        self.encode_document(plan, "backup plan")
+    }
+
+    fn encode_document<T: serde::Serialize>(
+        &self,
+        value: &T,
+        label: &str,
+    ) -> anyhow::Result<String> {
+        let plaintext = serde_json::to_vec(value)?;
         let mut nonce = [0_u8; 12];
         OsRng.fill_bytes(&mut nonce);
         let encrypted = self
             .cipher
             .encrypt((&nonce).into(), plaintext.as_ref())
-            .map_err(|_| anyhow::anyhow!("encrypt backup plan"))?;
+            .map_err(|_| anyhow::anyhow!("encrypt {label}"))?;
         let mut payload = Vec::with_capacity(nonce.len() + encrypted.len());
         payload.extend_from_slice(&nonce);
         payload.extend_from_slice(&encrypted);
@@ -193,20 +238,29 @@ impl Store {
     }
 
     fn decode_plan(&self, document: &str) -> anyhow::Result<Plan> {
+        self.decode_document(document, "backup plan")
+    }
+
+    fn decode_document<T: serde::de::DeserializeOwned>(
+        &self,
+        document: &str,
+        label: &str,
+    ) -> anyhow::Result<T> {
         let Some(encoded) = document.strip_prefix(ENCRYPTED_PREFIX) else {
-            return serde_json::from_str(document).context("decode legacy plaintext plan");
+            return serde_json::from_str(document)
+                .with_context(|| format!("decode legacy plaintext {label}"));
         };
         let payload = STANDARD_NO_PAD
             .decode(encoded)
-            .context("decode encrypted plan")?;
+            .with_context(|| format!("decode encrypted {label}"))?;
         if payload.len() < 13 {
-            bail!("encrypted plan is truncated");
+            bail!("encrypted {label} is truncated");
         }
         let plaintext = self
             .cipher
             .decrypt((&payload[..12]).into(), &payload[12..])
-            .map_err(|_| anyhow::anyhow!("decrypt backup plan: secret key is incorrect"))?;
-        serde_json::from_slice(&plaintext).context("decode decrypted plan")
+            .map_err(|_| anyhow::anyhow!("decrypt {label}: secret key is incorrect"))?;
+        serde_json::from_slice(&plaintext).with_context(|| format!("decode decrypted {label}"))
     }
 
     async fn encrypt_existing_plans(&self) -> anyhow::Result<()> {
@@ -223,6 +277,65 @@ impl Store {
                 .await?;
         }
         Ok(())
+    }
+
+    async fn migrate_global_notifications(&self) -> anyhow::Result<()> {
+        let exists: Option<(String,)> =
+            sqlx::query_as("SELECT key FROM settings WHERE key = 'notifications'")
+                .fetch_optional(&self.pool)
+                .await?;
+        if exists.is_some() {
+            return Ok(());
+        }
+        let plans = self.list_plans().await?;
+        if plans.is_empty() {
+            return Ok(());
+        }
+        let mut candidates: Vec<NotificationCandidate> = plans
+            .into_iter()
+            .map(|plan| {
+                let mut config = plan.notifications;
+                config.normalize_legacy();
+                NotificationCandidate {
+                    plan_id: plan.id,
+                    plan_name: plan.name,
+                    plan_updated_at: plan.updated_at,
+                    config,
+                }
+            })
+            .collect();
+        let unanimous = candidates
+            .windows(2)
+            .all(|pair| pair[0].config == pair[1].config);
+        let has_configuration = candidates
+            .first()
+            .is_some_and(|candidate| !candidate.config.is_empty());
+        let valid = candidates
+            .first()
+            .is_none_or(|candidate| candidate.config.validate().is_ok());
+        let settings = if unanimous && has_configuration && valid {
+            GlobalNotificationSettings {
+                confirmed: true,
+                config: candidates
+                    .pop()
+                    .map(|candidate| candidate.config)
+                    .unwrap_or_default(),
+                candidates: Vec::new(),
+                updated_at: Utc::now(),
+            }
+        } else {
+            GlobalNotificationSettings {
+                confirmed: false,
+                config: NotificationConfig::default(),
+                candidates: if has_configuration || !unanimous {
+                    candidates
+                } else {
+                    Vec::new()
+                },
+                updated_at: Utc::now(),
+            }
+        };
+        self.save_notification_settings(&settings).await
     }
 }
 
@@ -315,6 +428,36 @@ mod tests {
     use super::*;
     use crate::config::plans_from_environment;
 
+    fn notification_plan(name: &str, url: &str) -> Plan {
+        let now = Utc::now();
+        let input = crate::model::PlanInput {
+            name: name.into(),
+            enabled: true,
+            schedule: "5 * * * *".into(),
+            timezone: "UTC".into(),
+            sources: vec![crate::model::FolderSource {
+                name: "data".into(),
+                path: "/data".into(),
+            }],
+            archive: Default::default(),
+            remotes: vec![crate::model::RemoteConfig {
+                name: "remote".into(),
+                directory: "/backup".into(),
+            }],
+            retention: Default::default(),
+            retry: Default::default(),
+            notifications: crate::model::NotificationConfig {
+                ping: crate::model::PingConfig {
+                    success_url: url.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            rclone_flags: vec![],
+        };
+        input.into_plan(Uuid::new_v4(), now)
+    }
+
     #[tokio::test]
     async fn seed_is_idempotent_and_plans_persist() {
         let directory = tempfile::tempdir().unwrap();
@@ -387,5 +530,67 @@ mod tests {
                 .password,
             "never-plaintext"
         );
+    }
+
+    #[tokio::test]
+    async fn identical_legacy_notifications_migrate_encrypted_and_confirmed() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::connect(
+            "sqlite::memory:",
+            directory.path().join("key").to_str().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
+        store
+            .save_plan(&notification_plan("first", "https://notify.example/secret"))
+            .await
+            .unwrap();
+        store
+            .save_plan(&notification_plan(
+                "second",
+                "https://notify.example/secret",
+            ))
+            .await
+            .unwrap();
+        store.migrate_global_notifications().await.unwrap();
+
+        let settings = store.notification_settings().await.unwrap();
+        assert!(settings.confirmed);
+        assert!(settings.config.ping.enabled);
+        assert!(settings.candidates.is_empty());
+        let (document,): (String,) =
+            sqlx::query_as("SELECT document FROM settings WHERE key='notifications'")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert!(document.starts_with(ENCRYPTED_PREFIX));
+        assert!(!document.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn conflicting_legacy_notifications_require_confirmation() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::connect(
+            "sqlite::memory:",
+            directory.path().join("key").to_str().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
+        store
+            .save_plan(&notification_plan("first", "https://one.example/token"))
+            .await
+            .unwrap();
+        store
+            .save_plan(&notification_plan("second", "https://two.example/token"))
+            .await
+            .unwrap();
+        store.migrate_global_notifications().await.unwrap();
+
+        let settings = store.notification_settings().await.unwrap();
+        assert!(!settings.confirmed);
+        assert_eq!(settings.candidates.len(), 2);
+        assert!(store.confirmed_notifications().await.unwrap().is_none());
     }
 }

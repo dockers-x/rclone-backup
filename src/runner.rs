@@ -105,6 +105,71 @@ impl Runner {
             .map(|_| ())
     }
 
+    pub async fn test_notification(
+        &self,
+        config: &NotificationConfig,
+        channel: &str,
+    ) -> anyhow::Result<()> {
+        let existing = self
+            .store
+            .notification_settings()
+            .await
+            .map(|settings| settings.config)
+            .unwrap_or_default();
+        let mut config = config.clone();
+        config.merge_redacted_from(&existing);
+        config
+            .validate_network_targets()
+            .await
+            .map_err(anyhow::Error::msg)?;
+        let mut test = NotificationConfig::default();
+        let event = match channel {
+            "ping" => {
+                test.ping = config.ping.clone();
+                test.ping.enabled = true;
+                if !test.ping.success_url.is_empty() || !test.ping.completion_url.is_empty() {
+                    test.ping.on_success = true;
+                    "success"
+                } else if !test.ping.start_url.is_empty() {
+                    test.ping.on_start = true;
+                    "start"
+                } else if !test.ping.failure_url.is_empty() {
+                    test.ping.on_failure = true;
+                    "failure"
+                } else {
+                    bail!("Ping URL is not configured");
+                }
+            }
+            "mail" => {
+                test.mail = config.mail.clone();
+                test.mail.enabled = true;
+                test.mail.on_success = true;
+                "success"
+            }
+            "serverchan" => {
+                test.serverchan = config.serverchan.clone();
+                test.serverchan.enabled = true;
+                test.serverchan.on_success = true;
+                "success"
+            }
+            _ => bail!("notification channel must be ping, mail, or serverchan"),
+        };
+        test.validate().map_err(anyhow::Error::msg)?;
+        let mut log = LogBuffer::notification_test(&test);
+        send_notification(
+            "Rclone Backup Test",
+            &test,
+            event,
+            "Notification test from Rclone Backup",
+            &mut log,
+        )
+        .await;
+        if log.text.contains(" warning:") || log.text.contains("ServerChan warning:") {
+            bail!("notification delivery failed; check the server log and configuration");
+        }
+        Ok(())
+    }
+
     pub async fn start(self, plan: Plan, trigger: &str) -> anyhow::Result<String> {
         if !self.rc.is_ready() {
             bail!("RCLONE_NOT_READY: configure at least one rclone remote first");
@@ -159,16 +224,29 @@ impl Runner {
     }
 
     async fn execute_inner(&self, plan: &Plan, run: &RunRecord) -> anyhow::Result<()> {
-        let mut log = LogBuffer::new(plan);
+        let notifications = match self.store.confirmed_notifications().await {
+            Ok(config) => config.unwrap_or_default(),
+            Err(error) => {
+                warn!(%error, "cannot load global notifications; continuing without them");
+                NotificationConfig::default()
+            }
+        };
+        let mut log = LogBuffer::new(plan, &notifications);
         let mut result = Err(anyhow!("backup did not run"));
         let mut final_attempt = 1;
         for attempt in 1..=plan.retry.max_attempts {
             final_attempt = attempt;
             log.line(format!("Attempt {attempt}/{}", plan.retry.max_attempts));
+            for remote in &plan.remotes {
+                log.target(remote, "pending", "");
+            }
+            log.phase("checking_destinations");
             self.store
                 .update_run(&run.id, "running", attempt, &log.text, false)
                 .await?;
-            result = self.backup_once(plan, &mut log).await;
+            result = self
+                .backup_once(plan, &notifications, &run.id, attempt, &mut log)
+                .await;
             if result.is_ok() {
                 break;
             }
@@ -186,14 +264,23 @@ impl Runner {
         }
         let status = if result.is_ok() { "success" } else { "failed" };
         if let Err(error) = &result {
+            log.phase("failed");
             log.line(format!("Backup failed: {error:#}"));
             notify(
                 plan,
+                &notifications,
                 "failure",
                 &format!("Backup failed at {}. Reason: {error:#}", Local::now()),
                 &mut log,
             )
             .await;
+        } else {
+            log.phase("completed");
+            log.line(format!(
+                "Backup completed successfully: {}/{} destinations.",
+                plan.remotes.len(),
+                plan.remotes.len()
+            ));
         }
         self.store
             .update_run(&run.id, status, final_attempt, &log.text, true)
@@ -201,14 +288,23 @@ impl Runner {
         result
     }
 
-    async fn backup_once(&self, plan: &Plan, log: &mut LogBuffer) -> anyhow::Result<()> {
+    async fn backup_once(
+        &self,
+        plan: &Plan,
+        notifications: &NotificationConfig,
+        run_id: &str,
+        attempt: u32,
+        log: &mut LogBuffer,
+    ) -> anyhow::Result<()> {
         let run_dir = self
             .work_dir
             .join(format!("{}-{}", safe_name(&plan.name), Uuid::new_v4()));
         fs::create_dir_all(&run_dir)
             .await
             .context("create working directory")?;
-        let result = self.backup_in_dir(plan, &run_dir, log).await;
+        let result = self
+            .backup_in_dir(plan, notifications, &run_dir, run_id, attempt, log)
+            .await;
         if let Err(error) = fs::remove_dir_all(&run_dir).await {
             warn!(%error, "cleanup working directory");
         }
@@ -218,18 +314,22 @@ impl Runner {
     async fn backup_in_dir(
         &self,
         plan: &Plan,
+        notifications: &NotificationConfig,
         run_dir: &Path,
+        run_id: &str,
+        attempt: u32,
         log: &mut LogBuffer,
     ) -> anyhow::Result<()> {
         notify(
             plan,
+            notifications,
             "start",
             &format!("Start backup at {}", Local::now()),
             log,
         )
         .await;
         self.ensure_workspace_outside_sources(plan, run_dir)?;
-        self.check_remotes(plan, log).await?;
+        self.check_remotes(plan, run_id, attempt, log).await?;
         let suffix = Local::now()
             .format(&plan.archive.suffix)
             .to_string()
@@ -249,6 +349,12 @@ impl Runner {
         let archive_prefix = archive_prefix(plan);
         let archive_base = format!("{archive_prefix}{suffix}");
         let staging = run_dir.join("contents");
+        log.phase(if plan.archive.kind == "none" {
+            "preparing_files"
+        } else {
+            "creating_archive"
+        });
+        self.checkpoint(run_id, attempt, log).await?;
         let upload = match plan.archive.kind.as_str() {
             "none" => {
                 stage_sources(&available_sources, &staging, log).await?;
@@ -291,6 +397,9 @@ impl Runner {
                 target
             }
         };
+        log.phase("uploading");
+        self.checkpoint(run_id, attempt, log).await?;
+        let mut upload_failures = Vec::new();
         for remote in &plan.remotes {
             let destination = if plan.archive.kind == "none" {
                 format!(
@@ -300,19 +409,46 @@ impl Runner {
             } else {
                 remote_path(remote)
             };
+            log.target(remote, "uploading", "");
             log.line(format!("rclone copy {} {destination}", upload.display()));
-            self.rc
+            self.checkpoint(run_id, attempt, log).await?;
+            match self
+                .rc
                 .run_command(
                     "copy",
                     vec![upload.to_string_lossy().into_owned(), destination.clone()],
                     plan.rclone_flags.clone(),
                 )
                 .await
-                .with_context(|| format!("upload to {destination}"))?;
+                .with_context(|| format!("upload to {destination}"))
+            {
+                Ok(_) => {
+                    log.target(remote, "success", "");
+                    log.line(format!("Upload to {destination} succeeded."));
+                }
+                Err(error) => {
+                    let detail = format!("{error:#}");
+                    log.target(remote, "failed", &detail);
+                    log.line(format!("Upload to {destination} failed: {detail}"));
+                    upload_failures.push(remote.name.clone());
+                }
+            }
+            self.checkpoint(run_id, attempt, log).await?;
         }
+        if !upload_failures.is_empty() {
+            bail!(
+                "upload failed for {}/{} destinations: {}",
+                upload_failures.len(),
+                plan.remotes.len(),
+                upload_failures.join(", ")
+            );
+        }
+        log.phase("retention");
+        self.checkpoint(run_id, attempt, log).await?;
         self.apply_retention(plan, log).await;
         notify(
             plan,
+            notifications,
             "success",
             &format!("Backup completed at {}", Local::now()),
             log,
@@ -321,11 +457,19 @@ impl Runner {
         Ok(())
     }
 
-    async fn check_remotes(&self, plan: &Plan, log: &mut LogBuffer) -> anyhow::Result<()> {
+    async fn check_remotes(
+        &self,
+        plan: &Plan,
+        run_id: &str,
+        attempt: u32,
+        log: &mut LogBuffer,
+    ) -> anyhow::Result<()> {
         let mut available = 0;
         for remote in &plan.remotes {
             let destination = remote_path(remote);
+            log.target(remote, "checking", "");
             log.line(format!("rclone lsd {destination}"));
+            self.checkpoint(run_id, attempt, log).await?;
             if self
                 .rc
                 .run_command("lsd", vec![destination.clone()], plan.rclone_flags.clone())
@@ -333,6 +477,8 @@ impl Runner {
                 .is_ok()
             {
                 available += 1;
+                log.target(remote, "ready", "");
+                self.checkpoint(run_id, attempt, log).await?;
                 continue;
             }
             log.line(format!("rclone mkdir {destination}"));
@@ -343,12 +489,26 @@ impl Runner {
                 .is_ok()
             {
                 available += 1;
+                log.target(remote, "ready", "");
+            } else {
+                log.target(
+                    remote,
+                    "unavailable",
+                    "connection check and directory creation failed",
+                );
             }
+            self.checkpoint(run_id, attempt, log).await?;
         }
         if available == 0 {
             bail!("all rclone destinations are unavailable");
         }
         Ok(())
+    }
+
+    async fn checkpoint(&self, run_id: &str, attempt: u32, log: &LogBuffer) -> anyhow::Result<()> {
+        self.store
+            .update_run(run_id, "running", attempt, &log.text, false)
+            .await
     }
 
     async fn apply_retention(&self, plan: &Plan, log: &mut LogBuffer) {
@@ -546,6 +706,10 @@ impl CommandSpec {
         self.stdin = Some(format!("{value}\n{value}\n"));
         self.secret(value)
     }
+    fn stdin(mut self, value: String) -> Self {
+        self.stdin = Some(value);
+        self
+    }
     fn secret(mut self, value: &str) -> Self {
         if !value.is_empty() {
             self.secrets.push(value.into());
@@ -602,28 +766,37 @@ async fn capture_command(spec: CommandSpec, log: &mut LogBuffer) -> anyhow::Resu
     Ok(stdout)
 }
 
-async fn notify(plan: &Plan, event: &str, content: &str, log: &mut LogBuffer) {
+async fn send_notification(
+    plan_name: &str,
+    notifications: &NotificationConfig,
+    event: &str,
+    content: &str,
+    log: &mut LogBuffer,
+) {
     let subject = format!(
         "{} Backup {}",
-        plan.name,
+        plan_name,
         match event {
             "start" => "Start",
             "success" => "Success",
             _ => "Failed",
         }
     );
-    let ping = &plan.notifications.ping;
+    let ping = &notifications.ping;
     let mut endpoints = vec![];
-    if event == "start" {
+    if ping.enabled && event == "start" && ping.on_start {
         endpoints.push((&ping.start_url, &ping.start_options));
     }
-    if event == "success" {
+    if ping.enabled && event == "success" && ping.on_success {
         endpoints.push((&ping.success_url, &ping.success_options));
     }
-    if event == "failure" {
+    if ping.enabled && event == "failure" && ping.on_failure {
         endpoints.push((&ping.failure_url, &ping.failure_options));
     }
-    if event != "start" {
+    if ping.enabled
+        && event != "start"
+        && ((event == "success" && ping.on_success) || (event == "failure" && ping.on_failure))
+    {
         endpoints.push((&ping.completion_url, &ping.completion_options));
     }
     for (url, options) in endpoints {
@@ -640,9 +813,19 @@ async fn notify(plan: &Plan, event: &str, content: &str, log: &mut LogBuffer) {
                     .replace("%{content}", content)
             })
             .collect();
-        let mut command = CommandSpec::new("curl").args([
+        let mut command = match pinned_curl_command(&url, "Ping").await {
+            Ok(command) => command,
+            Err(error) => {
+                log.line(format!("Ping notification warning: {error}"));
+                continue;
+            }
+        }
+        .args([
+            "--noproxy",
+            "*",
             "-m",
             "15",
+            "-f",
             "--retry",
             "3",
             "--retry-delay",
@@ -651,45 +834,30 @@ async fn notify(plan: &Plan, event: &str, content: &str, log: &mut LogBuffer) {
             "/dev/null",
             "-s",
         ]);
-        command.args.extend(args);
+        for argument in args {
+            command = command.arg(&argument).secret(&argument);
+        }
         command = command.arg(&url).secret(&url);
         if let Err(error) = run_command(command, log).await {
             log.line(format!("Ping notification warning: {error}"));
         }
     }
-    let mail = &plan.notifications.mail;
+    let mail = &notifications.mail;
     if mail.enabled
         && !mail.to.is_empty()
-        && ((event == "success" && mail.on_success) || (event == "failure" && mail.on_failure))
+        && ((event == "start" && mail.on_start)
+            || (event == "success" && mail.on_success)
+            || (event == "failure" && mail.on_failure))
     {
-        let mut command = CommandSpec::new("mail").args(["-s", &subject]);
-        command.args.extend(mail.smtp_options.clone());
-        command = command.arg(&mail.to);
-        let child = Command::new(&command.program)
-            .args(&command.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        match child {
-            Ok(mut child) => {
-                if let Some(stdin) = &mut child.stdin {
-                    let _ = stdin.write_all(content.as_bytes()).await;
-                }
-                drop(child.stdin.take());
-                match child.wait_with_output().await {
-                    Ok(out) if out.status.success() => log.line("Mail notification sent."),
-                    Ok(out) => log.line(format!(
-                        "Mail notification warning: {}",
-                        String::from_utf8_lossy(&out.stderr)
-                    )),
-                    Err(e) => log.line(format!("Mail notification warning: {e}")),
-                }
-            }
-            Err(e) => log.line(format!("Mail notification warning: {e}")),
+        match mail_command(mail, &subject, content).await {
+            Ok(command) => match run_command(command, log).await {
+                Ok(_) => log.line("Mail notification sent."),
+                Err(error) => log.line(format!("Mail notification warning: {error}")),
+            },
+            Err(error) => log.line(format!("Mail notification warning: {error}")),
         }
     }
-    let server = &plan.notifications.serverchan;
+    let server = &notifications.serverchan;
     if server.enabled
         && !server.send_key.is_empty()
         && ((event == "start" && server.on_start)
@@ -705,28 +873,156 @@ async fn notify(plan: &Plan, event: &str, content: &str, log: &mut LogBuffer) {
         } else {
             format!("https://sctapi.ftqq.com/{}.send", server.send_key)
         };
-        let command = CommandSpec::new("curl")
-            .args([
-                "-m",
-                "15",
-                "--retry",
-                "3",
-                "-s",
-                "-o",
-                "/dev/null",
-                "-X",
-                "POST",
-                "--data-urlencode",
-                &format!("text={subject}"),
-                "--data-urlencode",
-                &format!("desp={content}"),
-            ])
-            .arg(&url)
-            .secret(&server.send_key);
+        let command = match pinned_curl_command(&url, "ServerChan").await {
+            Ok(command) => command,
+            Err(error) => {
+                log.line(format!("ServerChan warning: {error}"));
+                return;
+            }
+        }
+        .args([
+            "--noproxy",
+            "*",
+            "-m",
+            "15",
+            "-f",
+            "--retry",
+            "3",
+            "-s",
+            "-o",
+            "/dev/null",
+            "-X",
+            "POST",
+            "--data-urlencode",
+            &format!("text={subject}"),
+            "--data-urlencode",
+            &format!("desp={content}"),
+        ])
+        .arg(&url)
+        .secret(&server.send_key);
         if let Err(error) = run_command(command, log).await {
             log.line(format!("ServerChan warning: {error}"));
         }
     }
+}
+
+async fn pinned_curl_command(url: &str, channel: &str) -> Result<CommandSpec, String> {
+    let target = resolve_public_url(url, channel).await?;
+    let scheme = url::Url::parse(url)
+        .map(|url| url.scheme().to_owned())
+        .map_err(|_| format!("{channel} URL is invalid"))?;
+    if !matches!(scheme.as_str(), "http" | "https" | "smtp" | "smtps") {
+        return Err(format!("{channel} URL scheme is not supported"));
+    }
+    Ok(pinned_curl_command_for_target(&target, &scheme))
+}
+
+fn pinned_curl_command_for_target(target: &ResolvedTarget, scheme: &str) -> CommandSpec {
+    let addresses = target
+        .addresses
+        .iter()
+        .map(|address| match address {
+            std::net::IpAddr::V4(address) => address.to_string(),
+            std::net::IpAddr::V6(address) => format!("[{address}]"),
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    CommandSpec::new("curl")
+        .args([
+            "--resolve",
+            &format!("{}:{}:{addresses}", target.host, target.port),
+        ])
+        .arg("--proto")
+        .arg(format!("={scheme}"))
+}
+
+async fn mail_command(
+    mail: &MailConfig,
+    subject: &str,
+    content: &str,
+) -> Result<CommandSpec, String> {
+    let options = mail_options(&mail.smtp_options)?;
+    let mut command = pinned_curl_command(&options.server, "SMTP")
+        .await?
+        .args([
+            "--noproxy",
+            "*",
+            "--connect-timeout",
+            "15",
+            "--max-time",
+            "30",
+            "--fail",
+        ])
+        .arg("--mail-from")
+        .arg(&options.from)
+        .arg("--mail-rcpt")
+        .arg(&mail.to)
+        .arg("--upload-file")
+        .arg("-")
+        .stdin(format!(
+            "To: {}\r\nFrom: {}\r\nSubject: {}\r\n\r\n{}\r\n",
+            mail.to, options.from, subject, content
+        ));
+    command = command.arg("--ssl-reqd");
+    if let Some(credentials) = options.credentials {
+        command = command.arg("--user").arg(&credentials).secret(&credentials);
+    }
+    Ok(command.arg(&options.server).secret(&options.server))
+}
+
+struct MailOptions {
+    server: String,
+    from: String,
+    credentials: Option<String>,
+}
+
+fn mail_options(options: &[String]) -> Result<MailOptions, String> {
+    let mut values = HashMap::new();
+    let mut index = 0;
+    while index < options.len() {
+        let value = if options[index] == "-S" {
+            index += 1;
+            options.get(index).map(String::as_str)
+        } else {
+            options[index].strip_prefix("-S")
+        }
+        .ok_or_else(|| "SMTP option is missing its value".to_owned())?;
+        let (name, value) = value
+            .split_once('=')
+            .ok_or_else(|| "SMTP variable must use name=value".to_owned())?;
+        values.insert(name, value.to_owned());
+        index += 1;
+    }
+    let server = values
+        .remove("mta")
+        .or_else(|| values.remove("smtp"))
+        .ok_or_else(|| "SMTP server is required".to_owned())?;
+    let from = values
+        .remove("from")
+        .ok_or_else(|| "SMTP from address is required".to_owned())?;
+    let credentials = match (
+        values.remove("smtp-auth-user"),
+        values.remove("smtp-auth-password"),
+    ) {
+        (Some(user), Some(password)) => Some(format!("{user}:{password}")),
+        (None, None) => None,
+        _ => return Err("SMTP user and password must be configured together".into()),
+    };
+    Ok(MailOptions {
+        server,
+        from,
+        credentials,
+    })
+}
+
+async fn notify(
+    plan: &Plan,
+    notifications: &NotificationConfig,
+    event: &str,
+    content: &str,
+    log: &mut LogBuffer,
+) {
+    send_notification(&plan.name, notifications, event, content, log).await;
 }
 
 pub(crate) fn safe_name(value: &str) -> String {
@@ -762,39 +1058,262 @@ fn urlencoding(value: &str) -> String {
 struct LogBuffer {
     text: String,
     secrets: Vec<String>,
+    targets: std::collections::BTreeMap<String, serde_json::Value>,
 }
 impl LogBuffer {
-    fn new(plan: &Plan) -> Self {
-        let secrets = vec![
+    fn new(plan: &Plan, notifications: &NotificationConfig) -> Self {
+        let mut secrets = vec![
             plan.archive.password.clone(),
-            plan.notifications.serverchan.send_key.clone(),
+            notifications.serverchan.send_key.clone(),
         ];
+        secrets.extend([
+            notifications.ping.completion_url.clone(),
+            notifications.ping.start_url.clone(),
+            notifications.ping.success_url.clone(),
+            notifications.ping.failure_url.clone(),
+        ]);
+        secrets.extend(notifications.mail.smtp_options.iter().filter_map(|value| {
+            let lowercase = value.to_ascii_lowercase();
+            ["password", "pass=", "token", "secret"]
+                .iter()
+                .any(|marker| lowercase.contains(marker))
+                .then(|| value.clone())
+        }));
+        secrets.extend(
+            notifications
+                .ping
+                .completion_options
+                .iter()
+                .chain(&notifications.ping.start_options)
+                .chain(&notifications.ping.success_options)
+                .chain(&notifications.ping.failure_options)
+                .cloned(),
+        );
+        secrets.extend(notifications.mail.smtp_options.iter().filter_map(|value| {
+            value
+                .split_once('=')
+                .map(|(_, secret)| secret.to_owned())
+                .filter(|secret| !secret.is_empty())
+        }));
+        secrets.push(notifications.mail.to.clone());
         Self {
             text: String::new(),
             secrets,
+            targets: std::collections::BTreeMap::new(),
         }
+    }
+    fn notification_test(notifications: &NotificationConfig) -> Self {
+        let empty_plan = Plan {
+            id: Uuid::nil(),
+            name: String::new(),
+            enabled: false,
+            schedule: String::new(),
+            timezone: String::new(),
+            sources: Vec::new(),
+            archive: ArchiveConfig::default(),
+            remotes: Vec::new(),
+            retention: RetentionPolicy::default(),
+            retry: RetryPolicy::default(),
+            notifications: NotificationConfig::default(),
+            rclone_flags: Vec::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        Self::new(&empty_plan, notifications)
     }
     fn line(&mut self, value: impl AsRef<str>) {
         let line = redact(value.as_ref(), &self.secrets);
-        if self.text.len() < MAX_LOG_BYTES {
-            self.text.push_str(&format!(
-                "[{}] {}\n",
-                Local::now().format("%Y-%m-%d %H:%M:%S"),
-                line
-            ));
-            self.text
-                .truncate(self.text.floor_char_boundary(MAX_LOG_BYTES));
+        let entry = format!("[{}] {}\n", Local::now().format("%Y-%m-%d %H:%M:%S"), line);
+        let required = self
+            .text
+            .len()
+            .saturating_add(entry.len())
+            .saturating_sub(MAX_LOG_BYTES);
+        if required > 0 {
+            let boundary = self.text.ceil_char_boundary(required.min(self.text.len()));
+            self.text.drain(..boundary);
         }
+        self.text.push_str(&entry);
+        if self.text.len() > MAX_LOG_BYTES {
+            let boundary = self
+                .text
+                .ceil_char_boundary(self.text.len() - MAX_LOG_BYTES);
+            self.text.drain(..boundary);
+        }
+    }
+
+    fn phase(&mut self, phase: &str) {
+        self.event(serde_json::json!({ "kind": "phase", "phase": phase }));
+        for target in self.targets.values().cloned().collect::<Vec<_>>() {
+            self.event(target);
+        }
+    }
+
+    fn target(&mut self, remote: &RemoteConfig, status: &str, detail: &str) {
+        let event = serde_json::json!({
+            "kind": "target",
+            "name": remote.name,
+            "directory": remote.directory,
+            "status": status,
+            "detail": detail,
+        });
+        self.targets.insert(
+            format!("{}\0{}", remote.name, remote.directory),
+            event.clone(),
+        );
+        self.event(event);
+    }
+
+    fn event(&mut self, value: serde_json::Value) {
+        self.line(format!("@event {value}"));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn curl_resolve_argument(command: &CommandSpec) -> Option<&str> {
+        command
+            .args
+            .windows(2)
+            .find(|arguments| arguments[0] == "--resolve")
+            .map(|arguments| arguments[1].as_str())
+    }
     #[test]
     fn names_and_secrets_are_safe() {
         assert_eq!(safe_name("My Files / 1"), "my-files---1");
         assert_eq!(redact("token=secret", &["secret".into()]), "token=••••••••");
+    }
+
+    #[test]
+    fn progress_events_are_structured_and_redacted() {
+        let remote = RemoteConfig {
+            name: "cloud".into(),
+            directory: "/backup".into(),
+        };
+        let mut log = LogBuffer {
+            text: String::new(),
+            secrets: vec!["secret".into()],
+            targets: Default::default(),
+        };
+
+        log.target(&remote, "failed", "token=secret");
+
+        let event = log
+            .text
+            .lines()
+            .next()
+            .unwrap()
+            .split_once("@event ")
+            .unwrap()
+            .1;
+        let event: serde_json::Value = serde_json::from_str(event).unwrap();
+        assert_eq!(event["kind"], "target");
+        assert_eq!(event["name"], remote.name);
+        assert!(!log.text.contains("secret"));
+        assert!(log.text.contains(REDACTED));
+    }
+
+    #[test]
+    fn progress_events_survive_a_full_log_buffer() {
+        let remote = RemoteConfig {
+            name: "cloud".into(),
+            directory: "/backup".into(),
+        };
+        let mut log = LogBuffer {
+            text: "x".repeat(MAX_LOG_BYTES),
+            secrets: vec![],
+            targets: Default::default(),
+        };
+        log.target(&remote, "success", "");
+        log.phase("completed");
+        assert!(log.text.len() <= MAX_LOG_BYTES);
+        assert!(log.text.contains(r#""status":"success""#));
+        assert!(log.text.contains(r#""phase":"completed""#));
+    }
+
+    #[test]
+    fn notification_options_are_log_secrets() {
+        let mut config = NotificationConfig::default();
+        config.ping.success_options = vec![
+            "--header".into(),
+            "Authorization: Bearer private-token".into(),
+        ];
+        config.mail.smtp_options =
+            vec!["-S".into(), "mta=smtps://alice:hunter2@smtp.example".into()];
+        let mut log = LogBuffer::notification_test(&config);
+        log.line("Authorization: Bearer private-token");
+        log.line("mta=smtps://alice:hunter2@smtp.example");
+        assert!(!log.text.contains("private-token"));
+        assert!(!log.text.contains("hunter2"));
+    }
+
+    #[test]
+    fn notification_curl_is_pinned_to_the_validated_addresses() {
+        let target = ResolvedTarget {
+            host: "notify.example".into(),
+            port: 443,
+            addresses: vec![
+                "8.8.8.8".parse().unwrap(),
+                "2606:4700:4700::1111".parse().unwrap(),
+            ],
+        };
+        let command = pinned_curl_command_for_target(&target, "https");
+        assert_eq!(
+            curl_resolve_argument(&command),
+            Some("notify.example:443:8.8.8.8,[2606:4700:4700::1111]")
+        );
+        assert!(!command.args.iter().any(|arg| arg == "--location"));
+        assert_eq!(
+            command.args.windows(2).find(|args| args[0] == "--proto"),
+            Some(&["--proto".into(), "=https".into()][..])
+        );
+    }
+
+    #[test]
+    fn notification_curl_never_performs_an_unpinned_lookup() {
+        let target = ResolvedTarget {
+            host: "notify.example".into(),
+            port: 443,
+            addresses: vec!["8.8.8.8".parse().unwrap()],
+        };
+        let command = pinned_curl_command_for_target(&target, "https");
+        assert_eq!(
+            curl_resolve_argument(&command),
+            Some("notify.example:443:8.8.8.8")
+        );
+        assert!(!command.args.iter().any(|argument| argument == "127.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn notification_curl_protocol_arguments_are_accepted() {
+        let command = CommandSpec::new("curl").args([
+            "--proto",
+            "=https",
+            "--noproxy",
+            "*",
+            "--connect-timeout",
+            "1",
+            "--max-time",
+            "1",
+            "https://127.0.0.1:9/",
+        ]);
+        let output = Command::new(&command.program)
+            .args(&command.args)
+            .output()
+            .await
+            .expect("curl must be installed for notification delivery");
+        assert_ne!(output.status.code(), Some(2));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("badly used"));
+    }
+
+    #[test]
+    fn smtp_server_detection_supports_split_options() {
+        assert_eq!(smtp_server_from_options(&[]), None);
+        assert_eq!(
+            smtp_server_from_options(&["-S".into(), "mta=smtps://smtp.example".into()]),
+            Some("smtps://smtp.example")
+        );
     }
 
     #[tokio::test]
@@ -815,6 +1334,7 @@ mod tests {
         let mut log = LogBuffer {
             text: String::new(),
             secrets: vec![],
+            targets: Default::default(),
         };
         stage_sources(&refs, &staging, &mut log).await.unwrap();
         assert_eq!(
@@ -854,6 +1374,7 @@ mod tests {
         let mut log = LogBuffer {
             text: String::new(),
             secrets: vec![],
+            targets: Default::default(),
         };
         stage_sources(&refs, &staging, &mut log).await.unwrap();
         assert_eq!(

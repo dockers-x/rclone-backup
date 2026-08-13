@@ -15,7 +15,7 @@ Rclone Backup v2 is a long-running Rust Web service for directory backups. It do
 ## Data boundaries
 
 - `/config/rclone/rclone.conf`: providers, endpoints, account credentials, OAuth tokens, crypt/compress settings.
-- Application SQLite: backup plans, alias references, scheduling, retry/retention/notification settings, and run history.
+- Application SQLite: backup plans, alias references, scheduling, retry/retention settings, encrypted global notifications, and run history.
 - Plan documents are AES-256-GCM encrypted before SQLite storage. The key is separate from the database and defaults to `/config/.rclone-backup.key` mode 0600.
 - Account responses contain only alias and provider type.
 
@@ -43,7 +43,7 @@ Rclone Backup v2 is a long-running Rust Web service for directory backups. It do
 - Numbered directory and remote variables remain supported.
 - `RCLONE_BACKUP_PLANS` can seed multiple plans once.
 - Database-export environment variables do not create backup work in v2.
-- The default command starts the service; `backup`, notification tests, and command passthrough remain available.
+- The default command starts the service; `backup`, global notification tests, and command passthrough remain available.
 
 ## Release gates
 

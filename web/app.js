@@ -21,11 +21,11 @@ const translations = {
     secureArchive: "7z · 安全优先（推荐）", compatibleArchive: "ZIP · 兼容优先", nativeDirectory: "原生目录 · 依赖 rclone 恢复",
     secureArchiveHint: "设置后使用 AES-256 并加密文件名，常见 7z 软件可直接恢复。", compatibleArchiveHint: "设置后使用 ZipCrypto，兼容性广但加密较弱；敏感备份请选择 7z。", nativeDirectoryHint: "不生成归档，密码不生效；恢复时使用 rclone copy。",
     keepDays: "保留天数", keepCount: "保留份数", retryPolicy: "重试策略",
-    retryHint: "在网络或远端临时故障时自动恢复", maxAttempts: "最大尝试次数", backoff: "退避方式",
+    retryHint: "在网络或远端临时故障时自动恢复", maxAttempts: "失败重试次数", retryCountHint: "不包含首次执行；填 0 表示失败后不重试", backoff: "退避方式",
     exponential: "指数退避", fixed: "固定间隔", initialDelay: "初始等待（秒）", maxDelay: "最长等待（秒）",
     notifications: "通知", notificationsHint: "Ping、SMTP 与 ServerChan", smtpHint: "在成功或失败时发送邮件",
-    recipient: "收件人", smtpOptions: "s-nail 参数", serverChanHint: "通过 SendKey 推送运行状态",
-    cancel: "取消", savePlan: "保存方案", runLog: "运行日志", label: "名称", path: "绝对路径",
+    recipient: "收件人", smtpOptions: "SMTP 参数", serverChanHint: "通过 SendKey 推送运行状态",
+    cancel: "取消", savePlan: "保存方案", runLog: "运行日志", runProgress: "运行进度", technicalLog: "技术日志", label: "名称", path: "绝对路径",
     remoteName: "Rclone 远端名", remoteDir: "远端目录", edit: "编辑", runNow: "立即运行", delete: "删除",
     source: "数据源", target: "目标", retry: "重试", attempts: "次", enabledBadge: "已启用", disabledBadge: "已停用",
     manual: "手动", scheduleTrigger: "定时", cli: "命令行", noRuns: "暂无运行记录", viewLog: "查看日志",
@@ -39,6 +39,13 @@ const translations = {
     remoteNeedsInput: "rclone 需要更多信息，请完成下方步骤。", authenticationOff: "认证未启用",
     storageAccounts: "存储账号", addAccount: "添加账号", accountBoundary: "账号和密钥只保存在 rclone 配置文件中；备份数据库仅引用别名。", noAccounts: "还没有存储账号", noAccountsHint: "添加一个 rclone 远端，连接 S3、WebDAV、SFTP 或其他提供商。",
     test: "测试", testSuccess: "连接测试成功", remoteDeleteConfirm: "确定删除这个存储账号吗？", remoteDeleted: "存储账号已删除", remoteEditHint: "为保护已有凭据，编辑时只提交需要变更的字段。", remoteUpdate: "编辑账号",
+    runStatus: "运行状态", phase: "当前阶段", attemptLabel: "第 {current}/{total} 次尝试", targetProgress: "存储目标", showPassword: "显示密码", hidePassword: "隐藏密码",
+    pending: "等待中", checking: "检查连接", ready: "连接可用", uploading: "上传中", success: "成功", failed: "失败", unavailable: "不可用", running: "运行中", retrying: "等待重试",
+    checking_destinations: "检查存储目标", preparing_files: "准备文件", creating_archive: "创建归档", retention: "执行保留策略", completed: "备份完成",
+    globalSettings: "全局设置", notConfigured: "未配置", configured: "已启用", globalNotificationHint: "所有手动与定时备份共用这一套通知配置。",
+    pingHint: "向健康检查或 Webhook URL 报告备份事件", enablePing: "启用 Ping", completionUrl: "完成 URL（成功或失败）", startUrl: "开始 URL", successUrl: "成功 URL", failureUrl: "失败 URL",
+    onStart: "开始", onSuccess: "成功", onFailure: "失败", smtpGlobalHint: "需填写 smtps:// 服务器和发件地址", enableSmtp: "启用 SMTP", enableServerChan: "启用 ServerChan",
+    sendTest: "发送测试", testingNotification: "正在发送…", notificationTestSuccess: "测试通知已发送", saveNotifications: "保存通知配置", notificationSaved: "通知配置已保存", notificationConflict: "检测到旧备份方案使用了不同的通知配置。请选择一个来源，确认后才会启用全局通知。", useConfiguration: "使用此配置", updatedAt: "更新于",
   },
   en: {
     skip: "Skip to main content", plans: "Backup plans", history: "Run history", serviceOnline: "Service online",
@@ -59,11 +66,11 @@ const translations = {
     secureArchive: "7z · Security first (recommended)", compatibleArchive: "ZIP · Compatibility first", nativeDirectory: "Native directory · Restore with rclone",
     secureArchiveHint: "With a password, uses AES-256 and filename encryption. Common 7z apps can restore it directly.", compatibleArchiveHint: "With a password, uses widely compatible but weaker ZipCrypto. Choose 7z for sensitive backups.", nativeDirectoryHint: "No archive is created and this password is ignored. Restore with rclone copy.",
     keepDays: "Keep days", keepCount: "Keep count", retryPolicy: "Retry policy",
-    retryHint: "Recover automatically from transient network or remote failures", maxAttempts: "Maximum attempts", backoff: "Backoff",
+    retryHint: "Recover automatically from transient network or remote failures", maxAttempts: "Retries after failure", retryCountHint: "Excludes the first attempt; use 0 to disable retries", backoff: "Backoff",
     exponential: "Exponential", fixed: "Fixed interval", initialDelay: "Initial delay (seconds)", maxDelay: "Maximum delay (seconds)",
     notifications: "Notifications", notificationsHint: "Ping, SMTP, and ServerChan", smtpHint: "Send mail on success or failure",
-    recipient: "Recipient", smtpOptions: "s-nail options", serverChanHint: "Push run status with a SendKey",
-    cancel: "Cancel", savePlan: "Save plan", runLog: "Run log", label: "Name", path: "Absolute path",
+    recipient: "Recipient", smtpOptions: "SMTP options", serverChanHint: "Push run status with a SendKey",
+    cancel: "Cancel", savePlan: "Save plan", runLog: "Run log", runProgress: "Run progress", technicalLog: "Technical log", label: "Name", path: "Absolute path",
     remoteName: "Rclone remote", remoteDir: "Remote directory", edit: "Edit", runNow: "Run now", delete: "Delete",
     source: "Sources", target: "Targets", retry: "Retry", attempts: "attempts", enabledBadge: "Enabled", disabledBadge: "Disabled",
     manual: "Manual", scheduleTrigger: "Scheduled", cli: "CLI", noRuns: "No runs yet", viewLog: "View log",
@@ -77,13 +84,20 @@ const translations = {
     remoteNeedsInput: "rclone needs more information. Complete the next step below.", authenticationOff: "Authentication disabled",
     storageAccounts: "Storage accounts", addAccount: "Add account", accountBoundary: "Accounts and credentials live only in rclone.conf; the backup database stores alias references only.", noAccounts: "No storage accounts yet", noAccountsHint: "Add an rclone remote for S3, WebDAV, SFTP, or another provider.",
     test: "Test", testSuccess: "Connection test passed", remoteDeleteConfirm: "Delete this storage account?", remoteDeleted: "Storage account deleted", remoteEditHint: "To protect existing credentials, editing submits only fields you choose to change.", remoteUpdate: "Edit account",
+    runStatus: "Run status", phase: "Current stage", attemptLabel: "Attempt {current}/{total}", targetProgress: "Storage targets", showPassword: "Show password", hidePassword: "Hide password",
+    pending: "Pending", checking: "Checking", ready: "Ready", uploading: "Uploading", success: "Succeeded", failed: "Failed", unavailable: "Unavailable", running: "Running", retrying: "Retrying",
+    checking_destinations: "Checking destinations", preparing_files: "Preparing files", creating_archive: "Creating archive", retention: "Applying retention", completed: "Backup completed",
+    globalSettings: "Global settings", notConfigured: "Not configured", configured: "Enabled", globalNotificationHint: "All manual and scheduled backups share this notification configuration.",
+    pingHint: "Report backup events to health-check or webhook URLs", enablePing: "Enable Ping", completionUrl: "Completion URL (success or failure)", startUrl: "Start URL", successUrl: "Success URL", failureUrl: "Failure URL",
+    onStart: "Start", onSuccess: "Success", onFailure: "Failure", smtpGlobalHint: "Requires an smtps:// server and sender address", enableSmtp: "Enable SMTP", enableServerChan: "Enable ServerChan",
+    sendTest: "Send test", testingNotification: "Sending…", notificationTestSuccess: "Test notification sent", saveNotifications: "Save notifications", notificationSaved: "Notification settings saved", notificationConflict: "Legacy plans contain different notification settings. Select a source before global notifications can be enabled.", useConfiguration: "Use this configuration", updatedAt: "Updated",
   },
 };
 
 const state = {
   language: localStorage.getItem("language") || (navigator.language.startsWith("zh") ? "zh" : "en"),
   theme: localStorage.getItem("theme") || "system",
-  plans: [], runs: [], remotes: [], status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null,
+  plans: [], runs: [], remotes: [], notifications: null, status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, openRunId: null,
 };
 
 function t(key) { return translations[state.language][key] || key; }
@@ -113,7 +127,24 @@ function applyPreferences() {
   $("#languageButton span").textContent = state.language === "zh" ? "中文" : "EN";
   $("#newPlanButton").setAttribute("aria-label", t("newPlan"));
   $$("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });
+  const passwordToggle = $("[data-action=\"toggle-password\"]");
+  if (passwordToggle) passwordToggle.setAttribute("aria-label", t(passwordToggle.getAttribute("aria-pressed") === "true" ? "hidePassword" : "showPassword"));
   if ($("#planDialog")?.open) updateArchiveHint();
+  updateNavigation();
+}
+
+function updateNavigation() {
+  const id = location.hash.slice(1) || "plans";
+  $$(".nav-item").forEach((item) => {
+    const active = item.getAttribute("href") === `#${id}`;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page"); else item.removeAttribute("aria-current");
+  });
+}
+
+function setMenuOpen(open) {
+  document.body.classList.toggle("menu-open", open);
+  $("#menuButton").setAttribute("aria-expanded", String(open));
 }
 
 function toast(message, error = false) {
@@ -129,11 +160,13 @@ function toast(message, error = false) {
 
 async function loadAll() {
   try {
-    const [plans, runs, status, health, remoteResponse] = await Promise.all([
-      api("/api/plans"), api("/api/runs?limit=50"), api("/api/status"), api("/api/health"), api("/api/rclone/remotes"),
+    const [plans, runs, status, health, remoteResponse, notifications] = await Promise.all([
+      api("/api/plans"), api("/api/runs?limit=50"), api("/api/status"), api("/api/health"), api("/api/rclone/remotes"), api("/api/notifications"),
     ]);
-    Object.assign(state, { plans, runs, status, remotes: remoteResponse.remotes || [] });
+    Object.assign(state, { plans, runs, status, notifications, remotes: remoteResponse.remotes || [] });
     $("#version").textContent = `v${health.version}`;
+    document.title = health.site_name;
+    $("#siteName").textContent = health.site_name;
     render();
   } catch (error) {
     toast(`${t("loadError")}: ${error.message}`, true);
@@ -145,8 +178,60 @@ function render() {
   renderMetrics();
   renderPlans();
   renderAccounts();
+  renderNotifications();
   renderRuns();
   renderStatus();
+}
+
+function renderNotifications() {
+  const settings = state.notifications;
+  if (!settings) return;
+  const config = settings.config || {};
+  const ping = config.ping || {}; const mail = config.mail || {}; const server = config.serverchan || {};
+  const form = $("#notificationForm");
+  const values = {
+    ping_enabled: ping.enabled, ping_completion: ping.completion_url, ping_start: ping.start_url, ping_success: ping.success_url, ping_failure: ping.failure_url,
+    ping_on_start: ping.on_start, ping_on_success: ping.on_success, ping_on_failure: ping.on_failure,
+    mail_enabled: mail.enabled, mail_to: mail.to, mail_options: joinArgs(mail.smtp_options || []), mail_on_start: mail.on_start, mail_on_success: mail.on_success, mail_on_failure: mail.on_failure,
+    server_enabled: server.enabled, server_key: server.send_key, server_on_start: server.on_start, server_on_success: server.on_success, server_on_failure: server.on_failure,
+  };
+  Object.entries(values).forEach(([name, value]) => {
+    const input = form.elements[name]; if (!input) return;
+    if (input.type === "checkbox") input.checked = Boolean(value); else input.value = value || "";
+  });
+  const active = settings.confirmed && Boolean(ping.enabled || mail.enabled || server.enabled);
+  const badge = $("#notificationState"); badge.textContent = t(active ? "configured" : "notConfigured"); badge.className = `badge ${active ? "enabled" : "disabled"}`;
+  $("#notificationSavedAt").textContent = settings.confirmed ? `${t("updatedAt")} ${new Intl.DateTimeFormat(state.language === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(settings.updated_at))}` : "";
+  const conflict = $("#notificationConflict");
+  conflict.hidden = !settings.candidates?.length;
+  conflict.innerHTML = settings.candidates?.length ? `<strong>${escapeHtml(t("notificationConflict"))}</strong><div class="candidate-list">${settings.candidates.map((candidate) => `<article><div><b>${escapeHtml(candidate.plan_name)}</b><small>${escapeHtml(new Intl.DateTimeFormat(state.language === "zh" ? "zh-CN" : "en", { dateStyle: "medium" }).format(new Date(candidate.plan_updated_at)))}</small></div><button type="button" class="button ghost" data-action="select-notification-candidate" data-id="${candidate.plan_id}">${escapeHtml(t("useConfiguration"))}</button></article>`).join("")}</div>` : "";
+}
+
+function collectNotifications() {
+  const form = $("#notificationForm");
+  if (!form.reportValidity()) throw new Error(t("formInvalid"));
+  const value = (name) => form.elements[name].value.trim();
+  const checked = (name) => form.elements[name].checked;
+  const currentPing = state.notifications?.config?.ping || {};
+  return { ping: {
+    enabled: checked("ping_enabled"), on_start: checked("ping_on_start"), on_success: checked("ping_on_success"), on_failure: checked("ping_on_failure"),
+    completion_url: value("ping_completion"), completion_options: currentPing.completion_options || [], start_url: value("ping_start"), start_options: currentPing.start_options || [], success_url: value("ping_success"), success_options: currentPing.success_options || [], failure_url: value("ping_failure"), failure_options: currentPing.failure_options || [],
+  }, mail: { enabled: checked("mail_enabled"), smtp_options: splitArgs(value("mail_options")), to: value("mail_to"), on_start: checked("mail_on_start"), on_success: checked("mail_on_success"), on_failure: checked("mail_on_failure") },
+  serverchan: { enabled: checked("server_enabled"), send_key: value("server_key"), on_start: checked("server_on_start"), on_success: checked("server_on_success"), on_failure: checked("server_on_failure") } };
+}
+
+function syncNotificationRequirements() {
+  const form = $("#notificationForm");
+  form.elements.mail_to.required = form.elements.mail_enabled.checked;
+  form.elements.mail_options.required = form.elements.mail_enabled.checked;
+  form.elements.server_key.required = form.elements.server_enabled.checked;
+}
+
+async function saveNotifications(event) {
+  event.preventDefault(); const button = $("#saveNotificationsButton");
+  try { button.disabled = true; state.notifications = await api("/api/notifications", { method: "PUT", body: JSON.stringify({ config: collectNotifications() }) }); $("#notificationError").hidden = true; renderNotifications(); toast(t("notificationSaved")); }
+  catch (error) { $("#notificationError").textContent = error.message; $("#notificationError").hidden = false; }
+  finally { button.disabled = false; }
 }
 
 function renderStatus() {
@@ -189,7 +274,7 @@ function renderPlans() {
     const target = plan.remotes.length === 1 ? plan.remotes[0].name : `${plan.remotes.length} ${t("destinations")}`;
     return `<article class="plan-card" data-id="${plan.id}">
       <div class="plan-card-head"><div><p class="eyebrow">${escapeHtml(plan.timezone)}</p><h3>${escapeHtml(plan.name)}</h3><span class="mono">${escapeHtml(plan.schedule)}</span></div><span class="badge ${plan.enabled ? "enabled" : "disabled"}">${plan.enabled ? t("enabledBadge") : t("disabledBadge")}</span></div>
-      <div class="plan-facts"><div class="fact"><span>${t("source")}</span><strong title="${escapeHtml(source)}">${escapeHtml(source)}</strong></div><div class="fact"><span>${t("target")}</span><strong title="${escapeHtml(target)}">${escapeHtml(target)}</strong></div><div class="fact"><span>${t("retry")}</span><strong>${plan.retry.max_attempts} ${t("attempts")}</strong></div></div>
+      <div class="plan-facts"><div class="fact"><span>${t("source")}</span><strong title="${escapeHtml(source)}">${escapeHtml(source)}</strong></div><div class="fact"><span>${t("target")}</span><strong title="${escapeHtml(target)}">${escapeHtml(target)}</strong></div><div class="fact"><span>${t("retry")}</span><strong>${Math.max(0, plan.retry.max_attempts - 1)} ${t("attempts")}</strong></div></div>
       <div class="plan-actions"><button class="button primary" data-action="run" ${state.status?.rclone_ready ? "" : "disabled"}>${icon("play")}<span>${t("runNow")}</span></button><button class="icon-button" data-action="edit" aria-label="${t("edit")}">${icon("edit")}</button><button class="icon-button danger" data-action="delete" aria-label="${t("delete")}">${icon("trash")}</button></div>
     </article>`;
   }).join("");
@@ -203,8 +288,42 @@ function renderRuns() {
   }
   list.innerHTML = state.runs.map((run) => `<div class="history-row" data-run="${run.id}">
     <strong>${escapeHtml(run.plan_name)}</strong><time datetime="${run.started_at}">${new Intl.DateTimeFormat(state.language === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(run.started_at))}</time>
-    <span class="trigger">${t(run.trigger === "schedule" ? "scheduleTrigger" : run.trigger)}</span><span class="badge ${run.status}">${escapeHtml(run.status)}</span>
+    <span class="trigger">${t(run.trigger === "schedule" ? "scheduleTrigger" : run.trigger)}</span><span class="badge ${run.status}">${escapeHtml(t(run.status))}</span>
     <button class="icon-button" data-action="log" aria-label="${t("viewLog")}">${icon("chevron")}</button></div>`).join("");
+}
+
+function parseRunProgress(run) {
+  const progress = { phase: run.status, targets: new Map(), log: [] };
+  for (const line of (run.log || "").split("\n")) {
+    const marker = line.indexOf("@event ");
+    if (marker < 0) { if (line) progress.log.push(line); continue; }
+    try {
+      const event = JSON.parse(line.slice(marker + 7));
+      if (event.kind === "phase") progress.phase = event.phase;
+      if (event.kind === "target") progress.targets.set(`${event.name}\u0000${event.directory || ""}`, event);
+    } catch { progress.log.push(line); }
+  }
+  return progress;
+}
+
+function renderOpenRun() {
+  if (!state.openRunId || !$("#logDialog").open) return;
+  const run = state.runs.find((item) => item.id === state.openRunId);
+  if (!run) return;
+  const progress = parseRunProgress(run);
+  const plan = state.plans.find((item) => item.id === run.plan_id);
+  const maxAttempts = plan?.retry?.max_attempts || Math.max(1, run.attempt);
+  const status = run.status === "success" ? "success" : run.status === "failed" ? "failed" : "running";
+  const targets = [...progress.targets.values()];
+  const succeeded = targets.filter((item) => item.status === "success").length;
+  const overview = $("#runOverview");
+  const signature = JSON.stringify({ status, runStatus: run.status, attempt: run.attempt, maxAttempts, phase: progress.phase, targets });
+  if (overview.dataset.signature !== signature) overview.innerHTML = `<div class="run-summary ${status}"><span class="run-state-icon">${icon(status === "success" ? "check" : status === "failed" ? "x" : "clock")}</span><div><small>${escapeHtml(t("runStatus"))}</small><strong>${escapeHtml(t(run.status))}</strong><span>${escapeHtml(t("attemptLabel").replace("{current}", run.attempt).replace("{total}", maxAttempts))}</span></div><div class="run-phase" role="status"><small>${escapeHtml(t("phase"))}</small><strong>${escapeHtml(t(progress.phase))}</strong></div></div>
+    <div class="target-progress"><h3>${escapeHtml(t("targetProgress"))}<span>${succeeded}/${targets.length}</span></h3>${targets.length ? targets.map((target) => `<article class="target-status ${escapeHtml(target.status)}"><span class="target-icon">${icon(target.status === "success" || target.status === "ready" ? "check" : target.status === "failed" || target.status === "unavailable" ? "x" : "clock")}</span><div><strong>${escapeHtml(target.name)}</strong><small>${escapeHtml(target.directory || "")}${target.detail ? ` · ${escapeHtml(target.detail)}` : ""}</small></div><b>${escapeHtml(t(target.status))}</b></article>`).join("") : `<p class="target-empty">${escapeHtml(t("checking_destinations"))}</p>`}</div>`;
+  overview.dataset.signature = signature;
+  const pre = $("#logContent");
+  pre.textContent = progress.log.join("\n") || t("noRuns");
+  if (["running", "retrying"].includes(run.status)) pre.scrollTop = pre.scrollHeight;
 }
 
 function appendRow(kind, value = {}) {
@@ -224,6 +343,12 @@ function openPlan(plan = null) {
   state.editingId = plan?.id || null;
   const form = $("#planForm");
   form.reset();
+  const passwordInput = form.elements.archive_password;
+  const passwordToggle = $("[data-action=\"toggle-password\"]", form);
+  passwordInput.type = "password";
+  passwordToggle.setAttribute("aria-pressed", "false");
+  passwordToggle.setAttribute("aria-label", t("showPassword"));
+  passwordToggle.innerHTML = icon("eye");
   $("#formError").hidden = true;
   $("#sourcesEditor").innerHTML = "";
   $("#remotesEditor").innerHTML = "";
@@ -239,11 +364,8 @@ function openPlan(plan = null) {
     name: data.name, schedule: data.schedule, timezone: data.timezone, enabled: data.enabled,
     rclone_flags: joinArgs(data.rclone_flags), archive_kind: data.archive.kind, archive_password: data.archive.password,
     archive_suffix: data.archive.suffix, keep_days: data.retention.keep_days, keep_count: data.retention.keep_count,
-    max_attempts: data.retry.max_attempts, initial_delay: data.retry.initial_delay_seconds, max_delay: data.retry.max_delay_seconds,
-    backoff: data.retry.backoff, ping_success: data.notifications.ping?.success_url || "",
-    ping_failure: data.notifications.ping?.failure_url || "", mail_enabled: data.notifications.mail?.enabled || false,
-    mail_to: data.notifications.mail?.to || "", mail_options: joinArgs(data.notifications.mail?.smtp_options || []),
-    server_enabled: data.notifications.serverchan?.enabled || false, server_key: data.notifications.serverchan?.send_key || "",
+    retry_count: Math.max(0, data.retry.max_attempts - 1), initial_delay: data.retry.initial_delay_seconds, max_delay: data.retry.max_delay_seconds,
+    backoff: data.retry.backoff,
   })) {
     const input = form.elements[name];
     if (!input) continue;
@@ -281,12 +403,8 @@ function collectPlan() {
     archive: { kind: value("archive_kind"), password: value("archive_password"), suffix: value("archive_suffix") },
     remotes: $$(".remote-row").map((row) => ({ name: $('[data-field="name"]', row).value.trim(), directory: $('[data-field="directory"]', row).value.trim() })),
     retention: { keep_days: number("keep_days"), keep_count: number("keep_count") },
-    retry: { max_attempts: number("max_attempts"), initial_delay_seconds: number("initial_delay"), max_delay_seconds: number("max_delay"), backoff: value("backoff") },
-    notifications: {
-      ping: { completion_url: "", completion_options: [], start_url: "", start_options: [], success_url: value("ping_success"), success_options: [], failure_url: value("ping_failure"), failure_options: [] },
-      mail: { enabled: form.elements.mail_enabled.checked, smtp_options: splitArgs(value("mail_options")), to: value("mail_to"), on_success: true, on_failure: true },
-      serverchan: { enabled: form.elements.server_enabled.checked, send_key: value("server_key"), on_start: true, on_success: true, on_failure: true },
-    },
+    retry: { max_attempts: number("retry_count") + 1, initial_delay_seconds: number("initial_delay"), max_delay_seconds: number("max_delay"), backoff: value("backoff") },
+    notifications: { ping: {}, mail: {}, serverchan: {} },
     rclone_flags: splitArgs(value("rclone_flags")),
   };
 }
@@ -312,6 +430,7 @@ async function openRemoteWizard(remote = null) {
   $("#remoteError").hidden = true;
   $("#remoteResult").hidden = true;
   $("#remoteFlowFields").innerHTML = "";
+  $("#advancedProvider").hidden = true;
   state.remoteFlow = null;
   state.editingRemote = remote;
   $("#remoteForm").reset();
@@ -352,6 +471,7 @@ function selectProvider() {
   const provider = state.selectedProvider;
   $("#providerFields").innerHTML = "";
   $("#advancedProviderFields").innerHTML = "";
+  $("#advancedProvider").hidden = true;
   if (!provider) return;
   $("#providerDescription").textContent = provider.Description || provider.description || "";
   const options = provider.Options || provider.options || [];
@@ -456,7 +576,7 @@ async function saveRemote(event) {
 }
 
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-action], #newPlanButton, #configureRemoteButton, #addAccountButton, #themeButton, #languageButton, #menuButton, #refreshButton");
+  const button = event.target.closest("[data-action], .nav-item, #newPlanButton, #configureRemoteButton, #addAccountButton, #themeButton, #languageButton, #menuButton, #refreshButton");
   if (!button) return;
   const action = button.dataset.action;
   if (button.id === "newPlanButton" || action === "new") openPlan();
@@ -469,9 +589,18 @@ document.addEventListener("click", async (event) => {
     state.language = state.language === "zh" ? "en" : "zh";
     localStorage.setItem("language", state.language); render();
   }
-  if (button.id === "menuButton") document.body.classList.toggle("menu-open");
+  if (button.id === "menuButton") setMenuOpen(!document.body.classList.contains("menu-open"));
+  if (button.classList.contains("nav-item")) {
+    event.preventDefault();
+    location.hash = button.getAttribute("href").slice(1);
+    setMenuOpen(false);
+    updateNavigation();
+  }
   if (button.id === "refreshButton") loadAll();
-  if (["close", "close-log", "close-remote"].includes(action)) button.closest("dialog").close();
+  if (["close", "close-log", "close-remote"].includes(action)) {
+    button.closest("dialog").close();
+    if (action === "close-log") state.openRunId = null;
+  }
   if (action === "add-source") appendRow("source");
   if (action === "add-remote") appendRow("remote");
   if (action === "remove-row") button.closest(".repeat-row").remove();
@@ -479,7 +608,7 @@ document.addEventListener("click", async (event) => {
   if (card && action === "edit") openPlan(state.plans.find((plan) => plan.id === card.dataset.id));
   if (card && action === "run") {
     button.disabled = true;
-    try { await api(`/api/plans/${card.dataset.id}/run`, { method: "POST" }); toast(t("runQueued")); await loadAll(); }
+    try { const result = await api(`/api/plans/${card.dataset.id}/run`, { method: "POST" }); toast(t("runQueued")); await loadAll(); state.openRunId = result.run_id; $("#logDialog").showModal(); renderOpenRun(); }
     catch (error) { toast(error.message, true); } finally { button.disabled = false; }
   }
   if (card && action === "delete" && confirm(t("deleteConfirm"))) {
@@ -488,7 +617,27 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "log") {
     const run = state.runs.find((item) => item.id === button.closest(".history-row").dataset.run);
-    $("#logContent").textContent = run?.log || t("noRuns"); $("#logDialog").showModal();
+    state.openRunId = run?.id || null; $("#logDialog").showModal(); renderOpenRun();
+  }
+  if (action === "toggle-password") {
+    const input = button.closest(".password-field").querySelector("input");
+    const visible = input.type === "password";
+    input.type = visible ? "text" : "password";
+    button.setAttribute("aria-pressed", String(visible));
+    button.setAttribute("aria-label", t(visible ? "hidePassword" : "showPassword"));
+    button.innerHTML = icon(visible ? "eye-off" : "eye");
+    input.focus();
+  }
+  if (action === "select-notification-candidate") {
+    button.disabled = true;
+    try { state.notifications = await api("/api/notifications", { method: "PUT", body: JSON.stringify({ candidate_plan_id: button.dataset.id }) }); renderNotifications(); toast(t("notificationSaved")); }
+    catch (error) { toast(error.message, true); } finally { button.disabled = false; }
+  }
+  if (action === "test-notification") {
+    const original = button.textContent;
+    button.disabled = true; button.textContent = t("testingNotification");
+    try { await api("/api/notifications/test", { method: "POST", body: JSON.stringify({ channel: button.dataset.channel, config: collectNotifications() }) }); toast(t("notificationTestSuccess")); }
+    catch (error) { toast(error.message, true); } finally { button.disabled = false; button.textContent = original; }
   }
   const account = button.closest(".account-card");
   if (account && action === "test-remote") {
@@ -508,13 +657,20 @@ function updateArchiveHint() {
   const kind = form.elements.archive_kind.value;
   $("#archiveSecurityHint").textContent = t(kind === "7z" ? "secureArchiveHint" : kind === "zip" ? "compatibleArchiveHint" : "nativeDirectoryHint");
   form.elements.archive_password.disabled = kind === "none";
+  $("[data-action=\"toggle-password\"]", form).disabled = kind === "none";
 }
 
 document.addEventListener("click", (event) => {
-  if (document.body.classList.contains("menu-open") && !event.target.closest(".sidebar, #menuButton")) document.body.classList.remove("menu-open");
+  if (document.body.classList.contains("menu-open") && !event.target.closest(".sidebar, #menuButton")) setMenuOpen(false);
 });
+$("#notificationForm").addEventListener("change", syncNotificationRequirements);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("menu-open")) { setMenuOpen(false); $("#menuButton").focus(); }
+});
+window.addEventListener("hashchange", updateNavigation);
 $("#planForm").addEventListener("submit", savePlan);
 $("#remoteForm").addEventListener("submit", saveRemote);
+$("#notificationForm").addEventListener("submit", saveNotifications);
 $("#providerSelect").addEventListener("change", selectProvider);
 $("#planForm").elements.archive_kind.addEventListener("change", updateArchiveHint);
 $$("dialog").forEach((dialog) => dialog.addEventListener("click", (event) => {
@@ -523,13 +679,14 @@ $$("dialog").forEach((dialog) => dialog.addEventListener("click", (event) => {
 }));
 
 applyPreferences();
+syncNotificationRequirements();
 loadAll();
 setInterval(async () => {
   if (document.visibilityState === "visible") {
     try {
       state.status = await api("/api/status");
       state.runs = await api("/api/runs?limit=50");
-      renderStatus(); renderMetrics(); renderRuns();
+      renderStatus(); renderMetrics(); renderRuns(); renderOpenRun();
     } catch {}
   }
 }, 5000);

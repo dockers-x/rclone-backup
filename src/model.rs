@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
 pub const REDACTED: &str = "••••••••";
@@ -51,7 +52,7 @@ pub struct PlanInput {
 impl PlanInput {
     pub fn validate(&self) -> Result<(), String> {
         let name = self.name.trim();
-        if name.is_empty() || name.chars().count() > 80 {
+        if name.is_empty() || name.chars().count() > 80 || name.contains(['\0', '\r', '\n']) {
             return Err("name must contain 1 to 80 characters".into());
         }
         crate::schedule::parse_schedule(&self.schedule)?;
@@ -266,8 +267,177 @@ pub struct NotificationConfig {
     pub serverchan: ServerChanConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+impl NotificationConfig {
+    pub fn is_empty(&self) -> bool {
+        !self.ping.has_endpoint()
+            && !self.mail.enabled
+            && self.mail.to.trim().is_empty()
+            && self.mail.smtp_options.is_empty()
+            && !self.serverchan.enabled
+            && self.serverchan.send_key.trim().is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        self.ping.validate()?;
+        if self.mail.to.chars().count() > 320 || self.mail.smtp_options.len() > 64 {
+            return Err("SMTP notification configuration is too large".into());
+        }
+        if self.mail.enabled && self.mail.to.trim().is_empty() {
+            return Err("SMTP recipient is required when SMTP is enabled".into());
+        }
+        if self.mail.enabled && smtp_server_from_options(&self.mail.smtp_options).is_none() {
+            return Err("SMTP server is required when SMTP is enabled".into());
+        }
+        if !self.mail.to.is_empty() {
+            validate_mail_recipient(&self.mail.to)?;
+        }
+        if self.mail.enabled
+            && !(self.mail.on_start || self.mail.on_success || self.mail.on_failure)
+        {
+            return Err("at least one SMTP event is required when SMTP is enabled".into());
+        }
+        validate_mail_options(&self.mail.smtp_options)?;
+        if self.serverchan.send_key.chars().count() > 256
+            || self.serverchan.send_key.contains(['\0', '\r', '\n'])
+        {
+            return Err("ServerChan SendKey is invalid".into());
+        }
+        if self.serverchan.enabled && self.serverchan.send_key.trim().is_empty() {
+            return Err("ServerChan SendKey is required when ServerChan is enabled".into());
+        }
+        if self.serverchan.enabled
+            && !(self.serverchan.on_start
+                || self.serverchan.on_success
+                || self.serverchan.on_failure)
+        {
+            return Err(
+                "at least one ServerChan event is required when ServerChan is enabled".into(),
+            );
+        }
+        Ok(())
+    }
+
+    pub fn normalize_legacy(&mut self) {
+        if !self.ping.has_endpoint() {
+            self.ping.enabled = false;
+        } else if !self.ping.enabled {
+            self.ping.enabled = true;
+        }
+    }
+
+    pub fn merge_redacted_from(&mut self, existing: &Self) {
+        for (value, old) in [
+            (&mut self.ping.completion_url, &existing.ping.completion_url),
+            (&mut self.ping.start_url, &existing.ping.start_url),
+            (&mut self.ping.success_url, &existing.ping.success_url),
+            (&mut self.ping.failure_url, &existing.ping.failure_url),
+        ] {
+            if value == REDACTED {
+                value.clone_from(old);
+            }
+        }
+        if self.serverchan.send_key == REDACTED {
+            self.serverchan
+                .send_key
+                .clone_from(&existing.serverchan.send_key);
+        }
+        if self.mail.smtp_options.as_slice() == [REDACTED] {
+            self.mail
+                .smtp_options
+                .clone_from(&existing.mail.smtp_options);
+        } else {
+            for (index, value) in self.mail.smtp_options.iter_mut().enumerate() {
+                if value == REDACTED || value.ends_with(REDACTED) {
+                    let old = value
+                        .split_once('=')
+                        .and_then(|(key, _)| {
+                            existing.mail.smtp_options.iter().find(|old| {
+                                old.split_once('=')
+                                    .is_some_and(|(old_key, _)| old_key == key)
+                            })
+                        })
+                        .or_else(|| existing.mail.smtp_options.get(index));
+                    if let Some(old) = old {
+                        value.clone_from(old);
+                    }
+                }
+            }
+        }
+        for (values, old_values) in [
+            (
+                &mut self.ping.completion_options,
+                &existing.ping.completion_options,
+            ),
+            (&mut self.ping.start_options, &existing.ping.start_options),
+            (
+                &mut self.ping.success_options,
+                &existing.ping.success_options,
+            ),
+            (
+                &mut self.ping.failure_options,
+                &existing.ping.failure_options,
+            ),
+        ] {
+            if values.iter().all(|value| value == REDACTED) && !values.is_empty() {
+                values.clone_from(old_values);
+            }
+        }
+    }
+
+    pub async fn validate_network_targets(&self) -> Result<(), String> {
+        for value in [
+            &self.ping.completion_url,
+            &self.ping.start_url,
+            &self.ping.success_url,
+            &self.ping.failure_url,
+        ] {
+            if !value.is_empty() {
+                validate_public_url(value, "Ping").await?;
+            }
+        }
+        if let Some(server) = smtp_server_from_options(&self.mail.smtp_options) {
+            validate_public_url(server, "SMTP").await?;
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn smtp_server_from_options(options: &[String]) -> Option<&str> {
+    let mut index = 0;
+    while index < options.len() {
+        let value = if options[index] == "-S" {
+            index += 1;
+            options.get(index).map(String::as_str)
+        } else {
+            options[index].strip_prefix("-S")
+        };
+        if let Some((name, server)) = value.and_then(|value| value.split_once('='))
+            && matches!(name, "mta" | "smtp")
+        {
+            return Some(server);
+        }
+        index += 1;
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedTarget {
+    pub host: String,
+    pub port: u16,
+    pub addresses: Vec<IpAddr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub on_start: bool,
+    #[serde(default = "default_true")]
+    pub on_success: bool,
+    #[serde(default = "default_true")]
+    pub on_failure: bool,
     #[serde(default)]
     pub completion_url: String,
     #[serde(default)]
@@ -286,7 +456,74 @@ pub struct PingConfig {
     pub failure_options: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+impl Default for PingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            on_start: true,
+            on_success: true,
+            on_failure: true,
+            completion_url: String::new(),
+            completion_options: Vec::new(),
+            start_url: String::new(),
+            start_options: Vec::new(),
+            success_url: String::new(),
+            success_options: Vec::new(),
+            failure_url: String::new(),
+            failure_options: Vec::new(),
+        }
+    }
+}
+
+impl PingConfig {
+    fn has_endpoint(&self) -> bool {
+        [
+            &self.completion_url,
+            &self.start_url,
+            &self.success_url,
+            &self.failure_url,
+        ]
+        .into_iter()
+        .any(|value| !value.trim().is_empty())
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        for value in [
+            &self.completion_url,
+            &self.start_url,
+            &self.success_url,
+            &self.failure_url,
+        ] {
+            if value.is_empty() {
+                continue;
+            }
+            if value.chars().count() > 2048 || value.contains(['\0', '\r', '\n']) {
+                return Err("Ping URL is invalid".into());
+            }
+            let parsed = url::Url::parse(value).map_err(|_| "Ping URL is invalid")?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+                return Err("Ping URL must use HTTP or HTTPS".into());
+            }
+        }
+        for options in [
+            &self.completion_options,
+            &self.start_options,
+            &self.success_options,
+            &self.failure_options,
+        ] {
+            validate_ping_options(options)?;
+        }
+        if self.enabled && !self.has_endpoint() {
+            return Err("at least one Ping URL is required when Ping is enabled".into());
+        }
+        if self.enabled && !(self.on_start || self.on_success || self.on_failure) {
+            return Err("at least one Ping event is required when Ping is enabled".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MailConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -294,13 +531,28 @@ pub struct MailConfig {
     pub smtp_options: Vec<String>,
     #[serde(default)]
     pub to: String,
+    #[serde(default)]
+    pub on_start: bool,
     #[serde(default = "default_true")]
     pub on_success: bool,
     #[serde(default = "default_true")]
     pub on_failure: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+impl Default for MailConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            smtp_options: Vec::new(),
+            to: String::new(),
+            on_start: false,
+            on_success: true,
+            on_failure: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ServerChanConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -314,6 +566,18 @@ pub struct ServerChanConfig {
     pub on_failure: bool,
 }
 
+impl Default for ServerChanConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            send_key: String::new(),
+            on_start: true,
+            on_success: true,
+            on_failure: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRecord {
     pub id: String,
@@ -325,6 +589,242 @@ pub struct RunRecord {
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub log: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GlobalNotificationSettings {
+    #[serde(default)]
+    pub confirmed: bool,
+    #[serde(default)]
+    pub config: NotificationConfig,
+    #[serde(default)]
+    pub candidates: Vec<NotificationCandidate>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Default for GlobalNotificationSettings {
+    fn default() -> Self {
+        Self {
+            confirmed: false,
+            config: NotificationConfig::default(),
+            candidates: Vec::new(),
+            updated_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NotificationCandidate {
+    pub plan_id: Uuid,
+    pub plan_name: String,
+    pub plan_updated_at: DateTime<Utc>,
+    pub config: NotificationConfig,
+}
+
+fn validate_options_shape(options: &[String], channel: &str) -> Result<(), String> {
+    if options.len() > 64
+        || options
+            .iter()
+            .any(|value| value.len() > 2048 || value.contains(['\0', '\r', '\n']))
+    {
+        return Err(format!("{channel} options are invalid"));
+    }
+    Ok(())
+}
+
+fn validate_ping_options(options: &[String]) -> Result<(), String> {
+    validate_options_shape(options, "Ping")?;
+    let mut index = 0;
+    while index < options.len() {
+        let option = &options[index];
+        let takes_value = matches!(
+            option.as_str(),
+            "-X" | "--request"
+                | "-H"
+                | "--header"
+                | "-d"
+                | "--data"
+                | "--data-raw"
+                | "--data-urlencode"
+                | "-A"
+                | "--user-agent"
+                | "--connect-timeout"
+        );
+        if !takes_value || index + 1 >= options.len() {
+            return Err("Ping options contain an unsupported curl option".into());
+        }
+        let value = &options[index + 1];
+        if value.contains('@') && matches!(option.as_str(), "--data-urlencode")
+            || value.starts_with('@')
+            || value.contains("=@")
+        {
+            return Err("Ping options cannot read data from a file".into());
+        }
+        index += 2;
+    }
+    Ok(())
+}
+
+fn validate_mail_options(options: &[String]) -> Result<(), String> {
+    validate_options_shape(options, "SMTP")?;
+    let mut index = 0;
+    while index < options.len() {
+        let option = &options[index];
+        if option == "-S" {
+            if index + 1 >= options.len() || options[index + 1].starts_with('-') {
+                return Err("SMTP option is missing its value".into());
+            }
+            validate_mail_variable(&options[index + 1])?;
+            index += 2;
+        } else if let Some(value) = option.strip_prefix("-S")
+            && !value.is_empty()
+        {
+            validate_mail_variable(value)?;
+            index += 1;
+        } else {
+            return Err("SMTP options may only set supported SMTP variables".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_mail_variable(value: &str) -> Result<(), String> {
+    let (name, setting) = value
+        .split_once('=')
+        .ok_or_else(|| "SMTP variable must use name=value".to_owned())?;
+    const ALLOWED: &[&str] = &[
+        "mta",
+        "smtp",
+        "smtp-auth-user",
+        "smtp-auth-password",
+        "from",
+    ];
+    if !ALLOWED.contains(&name) {
+        return Err("SMTP variable is not allowed".into());
+    }
+    if matches!(name, "mta" | "smtp") {
+        let parsed = url::Url::parse(setting)
+            .map_err(|_| "SMTP server must be an smtp or smtps URL".to_owned())?;
+        if !matches!(parsed.scheme(), "smtp" | "smtps") || parsed.host_str().is_none() {
+            return Err("SMTP server must be an smtp or smtps URL".into());
+        }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err("SMTP server URL cannot contain credentials".into());
+        }
+    } else if name == "from" {
+        validate_mail_address(setting, "SMTP from address")?;
+    }
+    Ok(())
+}
+
+fn validate_mail_recipient(value: &str) -> Result<(), String> {
+    validate_mail_address(value, "SMTP recipient")
+}
+
+fn validate_mail_address(value: &str, field: &str) -> Result<(), String> {
+    let value = value.trim();
+    let valid = !value.starts_with('-')
+        && !value.contains(['\0', '\r', '\n', ',', ';', ' ', '\t'])
+        && value.len() <= 320
+        && value.split_once('@').is_some_and(|(local, domain)| {
+            !local.is_empty()
+                && !domain.is_empty()
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+                && domain.contains('.')
+                && local
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '%' | '+' | '-'))
+                && domain
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+        });
+    if !valid {
+        return Err(format!("{field} must be one email address"));
+    }
+    Ok(())
+}
+
+pub(crate) async fn resolve_public_url(
+    value: &str,
+    channel: &str,
+) -> Result<ResolvedTarget, String> {
+    let parsed = url::Url::parse(value).map_err(|_| format!("{channel} URL is invalid"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| format!("{channel} URL must have a host"))?;
+    if host.eq_ignore_ascii_case("localhost") {
+        return Err(format!(
+            "{channel} target must use a public network address"
+        ));
+    }
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| format!("{channel} URL must have a port"))?;
+    let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| format!("{channel} target cannot be resolved"))?
+        .collect();
+    if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+        return Err(format!(
+            "{channel} target must use a public network address"
+        ));
+    }
+    let mut addresses: Vec<IpAddr> = addresses.into_iter().map(|address| address.ip()).collect();
+    addresses.sort_unstable();
+    addresses.dedup();
+    Ok(ResolvedTarget {
+        host: host.to_owned(),
+        port,
+        addresses,
+    })
+}
+
+async fn validate_public_url(value: &str, channel: &str) -> Result<(), String> {
+    resolve_public_url(value, channel).await.map(|_| ())
+}
+
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_public_ipv4(ip),
+        IpAddr::V6(ip) => {
+            if let Some(ip) = ip.to_ipv4_mapped() {
+                is_public_ipv4(ip)
+            } else {
+                is_public_ipv6(ip)
+            }
+        }
+    }
+}
+
+fn is_public_ipv6(ip: std::net::Ipv6Addr) -> bool {
+    let [a, b, ..] = ip.segments();
+    a & 0xe000 == 0x2000
+        && !matches!(
+            (a, b),
+            (0x2001, 0x0000..=0x01ff) | (0x2001, 0x0db8) | (0x2002, _) | (0x3fff, 0x0000..=0x0fff)
+        )
+}
+
+fn is_public_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    !matches!(
+        (a, b, c),
+        (0, _, _)
+            | (10, _, _)
+            | (100, 64..=127, _)
+            | (127, _, _)
+            | (169, 254, _)
+            | (172, 16..=31, _)
+            | (192, 0, 0)
+            | (192, 0, 2)
+            | (192, 88, 99)
+            | (192, 168, _)
+            | (198, 18..=19, _)
+            | (198, 51, 100)
+            | (203, 0, 113)
+            | (224..=255, _, _)
+    )
 }
 
 fn default_true() -> bool {
@@ -373,5 +873,93 @@ mod tests {
             ],
             [5, 10, 20, 20]
         );
+    }
+
+    #[test]
+    fn notification_validation_rejects_dangerous_options() {
+        let mut config = NotificationConfig::default();
+        config.ping.enabled = true;
+        config.ping.success_url = "file:///etc/passwd".into();
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "Ping URL must use HTTP or HTTPS"
+        );
+
+        config.ping.success_url = "https://status.example/token".into();
+        config.ping.success_options = vec!["--output=/tmp/leak".into()];
+        assert!(config.validate().unwrap_err().contains("unsupported"));
+
+        config.ping.success_options = vec!["--data-binary".into(), "@/etc/passwd".into()];
+        assert!(config.validate().unwrap_err().contains("unsupported"));
+
+        config.ping.success_options = vec!["--data-urlencode".into(), "key@/etc/passwd".into()];
+        assert!(config.validate().unwrap_err().contains("cannot read"));
+
+        config.ping.success_options.clear();
+        config.mail.smtp_options = vec!["-a".into(), "/etc/passwd".into()];
+        assert!(config.validate().unwrap_err().contains("may only"));
+
+        config.mail.smtp_options = vec!["-S".into(), "netrc-pipe=touch /tmp/pwn".into()];
+        assert!(config.validate().unwrap_err().contains("not allowed"));
+
+        config.mail.smtp_options = vec!["-S".into(), "ssl-verify=ignore".into()];
+        assert!(config.validate().unwrap_err().contains("not allowed"));
+
+        config.mail.smtp_options = vec!["-S".into(), "mta=test:///config/key".into()];
+        assert!(config.validate().unwrap_err().contains("smtp or smtps"));
+
+        config.mail.smtp_options =
+            vec!["-S".into(), "mta=smtps://alice:hunter2@smtp.example".into()];
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("cannot contain credentials")
+        );
+
+        config.mail.smtp_options.clear();
+        config.mail.enabled = true;
+        config.mail.to = "receiver@example.com".into();
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("SMTP server is required")
+        );
+        config.mail.enabled = false;
+        config.mail.to = "-X!touch /tmp/pwn".into();
+        assert!(config.validate().unwrap_err().contains("one email"));
+    }
+
+    #[tokio::test]
+    async fn notification_targets_reject_local_networks() {
+        let mut config = NotificationConfig::default();
+        config.ping.success_url = "http://127.0.0.1:8080/test".into();
+        assert!(
+            config
+                .validate_network_targets()
+                .await
+                .unwrap_err()
+                .contains("public network")
+        );
+        config.ping.success_url = "http://169.254.169.254/latest/meta-data".into();
+        assert!(config.validate_network_targets().await.is_err());
+    }
+
+    #[test]
+    fn public_ip_check_rejects_ipv4_mapped_local_addresses() {
+        assert!(!is_public_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(!is_public_ip("::ffff:169.254.169.254".parse().unwrap()));
+        assert!(!is_public_ip("::ffff:10.0.0.1".parse().unwrap()));
+        assert!(is_public_ip("::ffff:8.8.8.8".parse().unwrap()));
+        assert!(!is_public_ip("100.64.0.1".parse().unwrap()));
+        assert!(!is_public_ip("192.0.2.1".parse().unwrap()));
+        assert!(!is_public_ip("2001:db8::1".parse().unwrap()));
+        assert!(!is_public_ip("2001:2::1".parse().unwrap()));
+        assert!(!is_public_ip("2001:10::1".parse().unwrap()));
+        assert!(!is_public_ip("2001:20::1".parse().unwrap()));
+        assert!(!is_public_ip("2002:0808:0808::1".parse().unwrap()));
+        assert!(!is_public_ip("3fff::1".parse().unwrap()));
+        assert!(is_public_ip("2606:4700:4700::1111".parse().unwrap()));
     }
 }

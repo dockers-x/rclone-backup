@@ -1,6 +1,6 @@
 services:
   backup:
-    image: czyt/rclone-backup:2.0.0
+    image: czyt/rclone-backup:2.0.1
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"

@@ -9,13 +9,13 @@ Rclone Backup v2 is a Rust backup service with an embedded bilingual Web UI. It 
   - **7z**: recommended; an optional password enables AES-256 and filename encryption.
   - **ZIP**: optional password uses broadly compatible ZipCrypto, with a security warning in the UI.
   - **Native directory**: no archive; restore through rclone.
-- Flexible Cron schedules, timezones, fixed/exponential retry, retention by age/count, and notifications.
+- Flexible Cron schedules, IANA timezones, configurable retries, retention by age/count, and shared global notifications.
 - Storage account wizard backed by rclone's provider schema. Every account can be tested.
 - Chinese/English, light/dark/system themes, and a responsive mobile layout.
 - Public authentication is off by default. Optional Basic Auth is available through environment variables.
 - OpenAPI at `/api/openapi.json` and API help at `/api/docs`.
 
-Provider credentials and rclone passwords are written only to `/config/rclone/rclone.conf`. Backup-plan documents, including archive and notification secrets, are AES-256-GCM encrypted before SQLite storage. The local encryption key is `/config/.rclone-backup.key` by default.
+Provider credentials and rclone passwords are written only to `/config/rclone/rclone.conf`. Backup-plan documents and global notification settings, including archive and delivery secrets, are AES-256-GCM encrypted before SQLite storage. The local encryption key is `/config/.rclone-backup.key` by default.
 
 ## Start
 
@@ -26,7 +26,7 @@ docker run -d \
   -p 127.0.0.1:8080:8080 \
   -v rclone-backup-data:/config \
   -v /path/to/backup:/data:ro \
-  czyt/rclone-backup:2.0.0
+  czyt/rclone-backup:2.0.1
 ```
 
 Open `http://127.0.0.1:8080`. On a fresh installation the service displays the storage wizard and remains running. Scheduled and manual backups stay locked until at least one working rclone alias exists.
@@ -64,6 +64,14 @@ For providers with browser OAuth, you can also configure rclone using the existi
 docker exec -it rclone-backup rclone config
 ```
 
+## Notifications
+
+The Web UI has one global notification module shared by every manual and scheduled backup. Ping, SMTP, and ServerChan can be enabled independently, each with start, success, and failure event choices and a test action. Notification secrets are encrypted in SQLite and masked in API responses.
+
+SMTP delivery requires an explicit public `smtp://` or `smtps://` server and a sender address in the SMTP options, for example `-S mta=smtps://smtp.example.com -S from=backup@example.com`. Direct SMTP connections and HTTP notification endpoints are pinned to the public IP addresses resolved during validation to prevent internal-network requests and DNS rebinding.
+
+When upgrading, identical notification settings from old plans are migrated automatically. If plans contain different settings, notifications stay disabled until an administrator selects one of the listed source plans or saves a new global configuration. The old values remain in encrypted plan documents for rollback, but runtime delivery only uses the confirmed global configuration.
+
 ## Optional Web authentication
 
 Authentication is disabled by default. Set both values to enable Basic Auth; a partial configuration stops startup:
@@ -89,7 +97,7 @@ Common imported settings include:
 | `RCLONE_REMOTE_NAME[_N]`, `RCLONE_REMOTE_DIR[_N]` | Alias references and paths |
 | `ZIP_ENABLE`, `ZIP_TYPE`, `ZIP_PASSWORD` | Archive format and password |
 | `BACKUP_FILE_*`, `BACKUP_KEEP_*` | Filename and retention |
-| `PING_*`, `MAIL_*`, `SERVERCHAN_*` | Notifications |
+| `PING_*`, `MAIL_*`, `SERVERCHAN_*` | Initial global notification candidate |
 
 Database-export variables from v1 are intentionally ignored because v2 backs up directories only. Mount a database-generated export directory as a source if another tool produces dumps.
 
@@ -99,6 +107,7 @@ Multiple complete plans can be seeded once with `RCLONE_BACKUP_PLANS` as a JSON 
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `RCLONE_BACKUP_SITE_NAME` | `Rclone Backup` | Browser title and site name shown in the Web UI |
 | `RCLONE_BACKUP_ADDR` | `0.0.0.0:8080` | Public Web listener |
 | `RCLONE_BACKUP_DATABASE_URL` | `sqlite:///config/rclone-backup.db?mode=rwc` | Application SQLite |
 | `RCLONE_BACKUP_WORK_DIR` | `/tmp/rclone-backup` | Temporary workspace; must be outside every source directory |

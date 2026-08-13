@@ -43,6 +43,7 @@ pub const LEGACY_KEYS: &[&str] = &[
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub address: String,
+    pub site_name: String,
     pub database_url: String,
     pub work_dir: String,
     pub log_level: String,
@@ -66,8 +67,16 @@ impl AppConfig {
                 );
             }
         };
+        let site_name = resolve("RCLONE_BACKUP_SITE_NAME", &dotenv)
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "Rclone Backup".into());
+        if site_name.chars().count() > 80 {
+            return Err("RCLONE_BACKUP_SITE_NAME cannot exceed 80 characters".into());
+        }
         Ok(Self {
             address: env::var("RCLONE_BACKUP_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()),
+            site_name,
             database_url: env::var("RCLONE_BACKUP_DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:///config/rclone-backup.db?mode=rwc".into()),
             work_dir: env::var("RCLONE_BACKUP_WORK_DIR")
@@ -178,7 +187,7 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
         name: display_name,
         enabled: true,
         schedule: nonempty(get("CRON"), "5 * * * *"),
-        timezone: nonempty(get("TIMEZONE"), "UTC"),
+        timezone: normalize_legacy_timezone(&nonempty(get("TIMEZONE"), "UTC")),
         sources,
         archive: ArchiveConfig {
             kind: if zip_enabled {
@@ -197,6 +206,10 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
         retry: RetryPolicy::default(),
         notifications: NotificationConfig {
             ping: PingConfig {
+                enabled: false,
+                on_start: true,
+                on_success: true,
+                on_failure: true,
                 completion_url: get("PING_URL"),
                 completion_options: split_args(&get("PING_URL_CURL_OPTIONS")),
                 start_url: get("PING_URL_WHEN_START"),
@@ -210,6 +223,7 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
                 enabled: bool_or(&get("MAIL_SMTP_ENABLE"), false),
                 smtp_options: split_args(&get("MAIL_SMTP_VARIABLES")),
                 to: get("MAIL_TO"),
+                on_start: false,
                 on_success: bool_or(&get("MAIL_WHEN_SUCCESS"), true),
                 on_failure: bool_or(&get("MAIL_WHEN_FAILURE"), true),
             },
@@ -222,6 +236,13 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
             },
         },
         rclone_flags: split_args(&get("RCLONE_GLOBAL_FLAG")),
+    }
+}
+
+fn normalize_legacy_timezone(value: &str) -> String {
+    match value.trim() {
+        "CST" => "Asia/Shanghai".into(),
+        value => value.to_owned(),
     }
 }
 
@@ -311,6 +332,16 @@ mod tests {
         assert!(input.validate().is_ok());
         assert_eq!(input.sources[0].path, "/data");
         assert_eq!(input.remotes[0].name, "RcloneBackup");
+    }
+
+    #[test]
+    fn legacy_cst_timezone_is_migrated() {
+        let dotenv = HashMap::from([("TIMEZONE".into(), "CST".into())]);
+
+        let input = legacy_plan_input(&dotenv);
+
+        assert_eq!(input.timezone, "Asia/Shanghai");
+        assert!(input.validate().is_ok());
     }
 
     #[test]

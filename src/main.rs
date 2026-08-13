@@ -8,7 +8,7 @@ use rclone_backup::{
     schedule::is_due_in_timezone,
     store::Store,
 };
-use std::{collections::HashMap, env, process::Stdio, time::Duration};
+use std::{collections::HashMap, env, time::Duration};
 use tokio::{net::TcpListener, process::Command};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -34,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
         Some("backup") => backup(config, args.get(1)).await,
         Some("ping") => notification_test(config, "ping", args.get(1)).await,
         Some("mail") => notification_test(config, "mail", args.get(1)).await,
+        Some("serverchan") => notification_test(config, "serverchan", args.get(1)).await,
         Some(_) => passthrough(&args, &config.rclone_config).await,
     }
 }
@@ -84,6 +85,7 @@ async fn serve(config: AppConfig) -> anyhow::Result<()> {
             store,
             runner,
             public_auth: config.public_auth,
+            site_name: config.site_name,
         }),
     )
     .with_graceful_shutdown(shutdown())
@@ -160,68 +162,16 @@ async fn notification_test(
     kind: &str,
     argument: Option<&String>,
 ) -> anyhow::Result<()> {
-    let (store, _) = prepare(&config).await?;
-    let mut plans = store.list_plans().await?;
-    let plan = plans.pop().context("no backup plan")?;
-    match kind {
-        "ping" => {
-            let event = argument.map(String::as_str).unwrap_or("success");
-            let url = match event {
-                "completion" => &plan.notifications.ping.completion_url,
-                "start" => &plan.notifications.ping.start_url,
-                "success" => &plan.notifications.ping.success_url,
-                "failure" => &plan.notifications.ping.failure_url,
-                _ => bail!("ping identifier must be completion, start, success, or failure"),
-            };
-            if url.is_empty() {
-                bail!("ping URL is not configured");
-            }
-            let options = match event {
-                "completion" => &plan.notifications.ping.completion_options,
-                "start" => &plan.notifications.ping.start_options,
-                "success" => &plan.notifications.ping.success_options,
-                "failure" => &plan.notifications.ping.failure_options,
-                _ => unreachable!(),
-            };
-            let mut command = Command::new("curl");
-            command.args(["-f", "-m", "15", "--retry", "3"]);
-            command.args(options);
-            let status = command
-                .arg(
-                    url.replace("%{subject}", "RcloneBackup+Test")
-                        .replace("%{content}", "Notification+test"),
-                )
-                .status()
-                .await?;
-            if !status.success() {
-                bail!("ping command failed");
-            }
-            println!("ping sent successfully");
-        }
-        "mail" => {
-            let recipient = argument.cloned().unwrap_or(plan.notifications.mail.to);
-            if recipient.is_empty() {
-                bail!("mail recipient is not configured");
-            }
-            let mut child = Command::new("mail")
-                .args(["-s", "RcloneBackup Test", &recipient])
-                .args(&plan.notifications.mail.smtp_options)
-                .stdin(Stdio::piped())
-                .spawn()?;
-            use tokio::io::AsyncWriteExt;
-            child
-                .stdin
-                .as_mut()
-                .unwrap()
-                .write_all(b"RcloneBackup notification test\n")
-                .await?;
-            if !child.wait().await?.success() {
-                bail!("mail command failed");
-            }
-            println!("mail sent successfully");
-        }
-        _ => unreachable!(),
+    let (store, runner) = prepare(&config).await?;
+    let notifications = store
+        .confirmed_notifications()
+        .await?
+        .context("global notifications are not configured or confirmed")?;
+    if argument.is_some() {
+        tracing::warn!("notification test arguments are ignored; configure the global module");
     }
+    runner.test_notification(&notifications, kind).await?;
+    println!("{kind} sent successfully");
     Ok(())
 }
 
@@ -265,7 +215,7 @@ async fn shutdown() {
 
 fn print_help() {
     println!(
-        "rclone-backup {}\n\nUsage:\n  rclone-backup [serve]\n  rclone-backup backup [PLAN_ID]\n  rclone-backup ping [completion|start|success|failure]\n  rclone-backup mail [RECIPIENT]\n  rclone-backup <rclone|7z|curl|mail> [args...]\n\nThe default command starts the Web UI.",
+        "rclone-backup {}\n\nUsage:\n  rclone-backup [serve]\n  rclone-backup backup [PLAN_ID]\n  rclone-backup ping\n  rclone-backup mail\n  rclone-backup serverchan\n  rclone-backup <rclone|7z|curl|mail> [args...]\n\nNotification tests use the confirmed global configuration. The default command starts the Web UI.",
         env!("CARGO_PKG_VERSION")
     );
 }
