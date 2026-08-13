@@ -24,8 +24,8 @@ const translations = {
     keepDays: "保留天数", keepDaysHint: "删除超过指定天数的备份", keepCount: "保留份数", keepCountHint: "仅保留最新的指定份数", daysUnit: "天", copiesUnit: "份", passwordAlreadySet: "密码已设置。可点击眼睛查看，留空保持不变。", passwordRevealNeedsAuth: "启用 Web 密码认证后才能查看已有归档密码。", passwordHint: "密码提示（可选）", passwordHintHelp: "用于帮助回忆，请勿填写密码本身", retryPolicy: "重试策略",
     retryHint: "在网络或远端临时故障时自动恢复", maxAttempts: "失败重试次数", retryCountHint: "不包含首次执行；填 0 表示失败后不重试", backoff: "退避方式",
     exponential: "指数退避", fixed: "固定间隔", initialDelay: "初始等待（秒）", maxDelay: "最长等待（秒）",
-    notifications: "通知", notificationsHint: "Ping、SMTP 与 ServerChan", smtpHint: "在成功或失败时发送邮件",
-    recipient: "收件人", smtpOptions: "SMTP 参数", serverChanHint: "通过 SendKey 推送运行状态",
+    notifications: "通知", notificationsHint: "Ping、Email、Server酱与 ntfy", smtpHint: "在成功或失败时发送邮件",
+    recipient: "收件人", smtpHost: "SMTP 主机", smtpPort: "端口", smtpSecurity: "连接安全", smtpStarttls: "STARTTLS（推荐）", smtpTls: "TLS", smtpFrom: "发件人", smtpUsername: "用户名", smtpPassword: "密码", smtpPasswordHint: "密码已保存时会显示掩码，保持不变即可继续使用。", serverChanHint: "通过 SendKey 推送运行状态",
     cancel: "取消", savePlan: "保存方案", runLog: "运行日志", runProgress: "运行进度", technicalLog: "技术日志", label: "名称", path: "绝对路径",
     remoteName: "Rclone 远端名", remoteDir: "远端目录", edit: "编辑", runNow: "立即运行", delete: "删除",
     source: "数据源", target: "目标", retry: "重试", attempts: "次", enabledBadge: "已启用", disabledBadge: "已停用",
@@ -70,8 +70,8 @@ const translations = {
     keepDays: "Keep by age", keepDaysHint: "Delete backups older than the specified number of days", keepCount: "Keep by count", keepCountHint: "Keep only the specified number of newest backups", daysUnit: "days", copiesUnit: "copies", passwordAlreadySet: "A password is set. Use the eye to reveal it, or leave blank to keep it.", passwordRevealNeedsAuth: "Enable web password authentication to reveal an existing archive password.", passwordHint: "Password hint (optional)", passwordHintHelp: "A memory aid only; do not enter the password itself", retryPolicy: "Retry policy",
     retryHint: "Recover automatically from transient network or remote failures", maxAttempts: "Retries after failure", retryCountHint: "Excludes the first attempt; use 0 to disable retries", backoff: "Backoff",
     exponential: "Exponential", fixed: "Fixed interval", initialDelay: "Initial delay (seconds)", maxDelay: "Maximum delay (seconds)",
-    notifications: "Notifications", notificationsHint: "Ping, SMTP, and ServerChan", smtpHint: "Send mail on success or failure",
-    recipient: "Recipient", smtpOptions: "SMTP options", serverChanHint: "Push run status with a SendKey",
+    notifications: "Notifications", notificationsHint: "Ping, Email, ServerChan, and ntfy", smtpHint: "Send mail on success or failure",
+    recipient: "Recipient", smtpHost: "SMTP host", smtpPort: "Port", smtpSecurity: "Connection security", smtpStarttls: "STARTTLS (recommended)", smtpTls: "TLS", smtpFrom: "From address", smtpUsername: "Username", smtpPassword: "Password", smtpPasswordHint: "A saved password appears masked. Leave it unchanged to keep using it.", serverChanHint: "Push run status with a SendKey",
     cancel: "Cancel", savePlan: "Save plan", runLog: "Run log", runProgress: "Run progress", technicalLog: "Technical log", label: "Name", path: "Absolute path",
     remoteName: "Rclone remote", remoteDir: "Remote directory", edit: "Edit", runNow: "Run now", delete: "Delete",
     source: "Sources", target: "Targets", retry: "Retry", attempts: "attempts", enabledBadge: "Enabled", disabledBadge: "Disabled",
@@ -271,7 +271,7 @@ function notificationDetail(target) {
 function notificationFields(target) {
   const config = target.config || {};
   const input = (label, name, value = "", type = "text", extra = "") => `<label class="field"><span>${escapeHtml(label)}</span><input data-notification-field="${name}" type="${type}" value="${escapeHtml(value)}" ${extra}></label>`;
-  if (target.type === "email") return `${input(t("recipient"), "to", config.to, "email", "required autocomplete=\"email\"")}${input(t("smtpOptions"), "smtp_options", joinArgs(config.smtp_options || []), "text", "required autocomplete=\"off\"")}`;
+  if (target.type === "email") return `${input(t("smtpHost"), "host", config.host, "text", "required placeholder=\"smtp.example.com\" autocomplete=\"url\"")}${input(t("smtpPort"), "port", config.port || 587, "number", "required min=\"1\" max=\"65535\" inputmode=\"numeric\"")}<label class="field"><span>${escapeHtml(t("smtpSecurity"))}</span><select data-notification-field="security"><option value="starttls" ${config.security !== "tls" ? "selected" : ""}>${escapeHtml(t("smtpStarttls"))}</option><option value="tls" ${config.security === "tls" ? "selected" : ""}>${escapeHtml(t("smtpTls"))}</option></select></label>${input(t("smtpFrom"), "from", config.from, "email", "required autocomplete=\"email\"")}${input(t("smtpUsername"), "username", config.username, "text", "autocomplete=\"username\"")}<label class="field"><span>${escapeHtml(t("smtpPassword"))}</span><input data-notification-field="password" type="password" value="${escapeHtml(config.password)}" autocomplete="new-password"><small>${escapeHtml(t("smtpPasswordHint"))}</small></label>${input(t("recipient"), "to", config.to, "email", "required autocomplete=\"email\"")}`;
   if (target.type === "serverchan") {
     const href = config.channel === "app" ? "https://sc3.ft07.com/sendkey" : "https://sct.ftqq.com/sendkey";
     return `${input("SendKey", "send_key", config.send_key, "password", "required autocomplete=\"new-password\"")}<a class="field-link" href="${href}" target="_blank" rel="noreferrer">${escapeHtml(notificationTypeLabel(target))} · SendKey</a>`;
@@ -833,7 +833,7 @@ document.addEventListener("click", async (event) => {
     const id = crypto.randomUUID();
     const [type, channel] = selected.startsWith("serverchan-") ? ["serverchan", selected.split("-")[1]] : [selected, null];
     const defaults = type === "ping" ? { completion_url: "", start_url: "", success_url: "", failure_url: "" }
-      : type === "email" ? { smtp_options: [], to: "" }
+      : type === "email" ? { host: "", port: 587, security: "starttls", from: "", username: "", password: "", to: "" }
       : type === "serverchan" ? { channel, send_key: "" }
       : { server: "https://ntfy.sh", topic: "", token: "" };
     const baseName = type === "serverchan" ? t(channel === "app" ? "serverChanApp" : "serverChanWechat") : type === "email" ? "Email" : type === "ntfy" ? "ntfy" : "Ping";
@@ -909,7 +909,7 @@ document.addEventListener("pointerdown", (event) => {
   const link = event.target.closest("[data-page-link]");
   navigationPointer = link ? { link, pointerType: event.pointerType } : null;
 });
-$("#notificationForm").addEventListener("input", (event) => {
+function syncNotificationField(event) {
   const row = event.target.closest(".notification-target");
   if (!row) return;
   const target = state.notificationTargets.find((item) => item.id === row.dataset.id);
@@ -919,9 +919,17 @@ $("#notificationForm").addEventListener("input", (event) => {
   if (event.target.matches("[data-notification-event]")) target[`on_${event.target.dataset.notificationEvent}`] = event.target.checked;
   if (event.target.matches("[data-notification-field]")) {
     const field = event.target.dataset.notificationField;
-    target.config[field] = field === "smtp_options" ? splitArgs(event.target.value) : event.target.value.trim();
+    if (field === "security") {
+      const port = row.querySelector('[data-notification-field="port"]');
+      if (event.target.value === "tls" && target.config.port === 587) target.config.port = 465;
+      if (event.target.value === "starttls" && target.config.port === 465) target.config.port = 587;
+      if (port) port.value = target.config.port;
+    }
+    target.config[field] = field === "port" ? Number(event.target.value) : event.target.value.trim();
   }
-});
+}
+$("#notificationForm").addEventListener("input", syncNotificationField);
+$("#notificationForm").addEventListener("change", syncNotificationField);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && document.body.classList.contains("menu-open")) { setMenuOpen(false); $("#menuButton").focus(); }
 });

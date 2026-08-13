@@ -463,10 +463,7 @@ impl NotificationConfig {
                 on_success: self.mail.on_success,
                 on_failure: self.mail.on_failure,
                 kind: NotificationTargetKind::Email {
-                    config: MailTargetConfig {
-                        smtp_options: self.mail.smtp_options.clone(),
-                        to: self.mail.to.clone(),
-                    },
+                    config: MailTargetConfig::from_legacy(&self.mail),
                 },
             });
         }
@@ -495,6 +492,22 @@ impl NotificationConfig {
             self.ping = Default::default();
             self.mail = Default::default();
             self.serverchan = Default::default();
+        }
+    }
+
+    pub fn normalize_email_targets(&mut self) {
+        for target in &mut self.targets {
+            let NotificationTargetKind::Email { config } = &mut target.kind else {
+                continue;
+            };
+            if config.host.is_empty() && !config.smtp_options.is_empty() {
+                let legacy = MailConfig {
+                    smtp_options: config.smtp_options.clone(),
+                    to: config.to.clone(),
+                    ..Default::default()
+                };
+                *config = MailTargetConfig::from_legacy(&legacy);
+            }
         }
     }
 
@@ -658,9 +671,7 @@ impl NotificationTarget {
             (
                 NotificationTargetKind::Email { config },
                 NotificationTargetKind::Email { config: old },
-            ) if config.smtp_options.as_slice() == [REDACTED] => {
-                config.smtp_options.clone_from(&old.smtp_options)
-            }
+            ) if config.password == REDACTED => config.password.clone_from(&old.password),
             (
                 NotificationTargetKind::Ntfy { config },
                 NotificationTargetKind::Ntfy { config: old },
@@ -776,21 +787,109 @@ impl PingTargetConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MailTargetConfig {
+    #[serde(default)]
+    pub host: String,
+    #[serde(default = "default_smtp_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub security: SmtpSecurity,
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub smtp_options: Vec<String>,
     pub to: String,
 }
 
 impl MailTargetConfig {
+    pub fn from_legacy(mail: &MailConfig) -> Self {
+        let values = mail_option_values(&mail.smtp_options).unwrap_or_default();
+        let server = values
+            .get("mta")
+            .or_else(|| values.get("smtp"))
+            .and_then(|value| url::Url::parse(value).ok());
+        let security = if server.as_ref().is_some_and(|url| url.scheme() == "smtps") {
+            SmtpSecurity::Tls
+        } else {
+            SmtpSecurity::Starttls
+        };
+        Self {
+            host: server
+                .as_ref()
+                .and_then(url::Url::host_str)
+                .unwrap_or_default()
+                .to_owned(),
+            port: server
+                .as_ref()
+                .and_then(url::Url::port_or_known_default)
+                .unwrap_or_else(|| {
+                    if security == SmtpSecurity::Tls {
+                        465
+                    } else {
+                        587
+                    }
+                }),
+            security,
+            from: values.get("from").cloned().unwrap_or_default(),
+            username: values.get("smtp-auth-user").cloned().unwrap_or_default(),
+            password: values
+                .get("smtp-auth-password")
+                .cloned()
+                .unwrap_or_default(),
+            smtp_options: Vec::new(),
+            to: mail.to.clone(),
+        }
+    }
+
     fn as_legacy(&self, target: &NotificationTarget) -> MailConfig {
+        let smtp_options = if self.host.is_empty() && !self.smtp_options.is_empty() {
+            self.smtp_options.clone()
+        } else {
+            let mut options = Vec::new();
+            let scheme = if self.security == SmtpSecurity::Tls {
+                "smtps"
+            } else {
+                "smtp"
+            };
+            for value in [
+                (!self.host.is_empty())
+                    .then(|| format!("mta={scheme}://{}:{}", self.host, self.port)),
+                (!self.from.is_empty()).then(|| format!("from={}", self.from)),
+                (!self.username.is_empty()).then(|| format!("smtp-auth-user={}", self.username)),
+                (!self.password.is_empty())
+                    .then(|| format!("smtp-auth-password={}", self.password)),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                options.extend(["-S".to_owned(), value]);
+            }
+            options
+        };
         MailConfig {
             enabled: target.enabled,
-            smtp_options: self.smtp_options.clone(),
+            smtp_options,
             to: self.to.clone(),
             on_start: target.on_start,
             on_success: target.on_success,
             on_failure: target.on_failure,
         }
     }
+}
+
+fn default_smtp_port() -> u16 {
+    587
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SmtpSecurity {
+    #[default]
+    Starttls,
+    Tls,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -920,6 +1019,33 @@ fn normalize_legacy_mail_options(options: &[String]) -> Result<Vec<String>, Stri
     }
     validate_mail_options(&normalized)?;
     Ok(normalized)
+}
+
+fn mail_option_values(
+    options: &[String],
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut values = std::collections::HashMap::new();
+    let mut index = 0;
+    while index < options.len() {
+        let value = if options[index] == "-S" {
+            index += 1;
+            options
+                .get(index)
+                .map(String::as_str)
+                .ok_or_else(|| "SMTP option is missing its value".to_owned())?
+        } else {
+            options[index]
+                .strip_prefix("-S")
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "SMTP options may only set supported SMTP variables".to_owned())?
+        };
+        let (name, setting) = value
+            .split_once('=')
+            .ok_or_else(|| "SMTP variable must use name=value".to_owned())?;
+        values.insert(name.to_owned(), setting.to_owned());
+        index += 1;
+    }
+    Ok(values)
 }
 
 fn legacy_mail_address(value: &str) -> Option<&str> {
@@ -1485,6 +1611,7 @@ mod tests {
                 config: MailTargetConfig {
                     smtp_options: vec!["-S".into(), "mta=smtps://smtp.example".into()],
                     to: "backup@example.com".into(),
+                    ..Default::default()
                 },
             },
         };
@@ -1494,6 +1621,66 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<NotificationTarget>(value).unwrap(),
             target
+        );
+    }
+
+    #[test]
+    fn legacy_email_target_is_normalized_to_standard_smtp_fields() {
+        let mut config = NotificationConfig {
+            targets: vec![NotificationTarget {
+                id: "legacy-mail".into(),
+                name: "Email".into(),
+                enabled: true,
+                on_start: false,
+                on_success: true,
+                on_failure: true,
+                kind: NotificationTargetKind::Email {
+                    config: MailTargetConfig {
+                        smtp_options: vec![
+                            "-S".into(),
+                            "mta=smtps://smtp.example.com:465".into(),
+                            "-S".into(),
+                            "from=sender@example.com".into(),
+                            "-S".into(),
+                            "smtp-auth-user=sender@example.com".into(),
+                            "-S".into(),
+                            "smtp-auth-password=secret".into(),
+                        ],
+                        to: "receiver@example.com".into(),
+                        ..Default::default()
+                    },
+                },
+            }],
+            ..Default::default()
+        };
+
+        config.normalize_email_targets();
+        let NotificationTargetKind::Email { config } = &config.targets[0].kind else {
+            panic!("expected email target");
+        };
+        assert_eq!(config.host, "smtp.example.com");
+        assert_eq!(config.port, 465);
+        assert_eq!(config.security, SmtpSecurity::Tls);
+        assert_eq!(config.from, "sender@example.com");
+        assert_eq!(config.username, "sender@example.com");
+        assert_eq!(config.password, "secret");
+        assert!(config.smtp_options.is_empty());
+        assert!(
+            config
+                .as_legacy(&NotificationTarget {
+                    id: "mail".into(),
+                    name: "Email".into(),
+                    enabled: true,
+                    on_start: false,
+                    on_success: true,
+                    on_failure: true,
+                    kind: NotificationTargetKind::Email {
+                        config: config.clone()
+                    },
+                })
+                .smtp_options
+                .iter()
+                .any(|value| value == "mta=smtps://smtp.example.com:465")
         );
     }
 

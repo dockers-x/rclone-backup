@@ -1,11 +1,12 @@
 [package]
 name = "rclone-backup-notifications"
-version = "2.0.4"
+version = "2.0.5"
 edition = "2024"
 license = "MIT"
 
 [dependencies]
 anyhow = "1.0"
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
 rclone-backup-core = { path = "../core" }
 tokio = { version = "1.47", features = ["io-util", "process"] }
 url = "2.5"

@@ -439,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_s_nail_mail_options_are_converted_for_curl() {
+    fn legacy_s_nail_mail_options_are_converted_to_standard_smtp_fields() {
         let dotenv = HashMap::from([
             ("MAIL_SMTP_ENABLE".into(), "true".into()),
             ("MAIL_TO".into(), "receiver@example.com".into()),
@@ -453,19 +453,14 @@ mod tests {
         let NotificationTargetKind::Email { config } = &input.notifications.targets[0].kind else {
             panic!("legacy mail must become an Email target");
         };
-        assert_eq!(
-            config.smtp_options,
-            [
-                "-S",
-                "mta=smtp://smtp.example:587",
-                "-S",
-                "smtp-auth-user=alice@example.com",
-                "-S",
-                "smtp-auth-password=test-secret",
-                "-S",
-                "from=alice@example.com",
-            ]
-        );
+        assert_eq!(config.host, "smtp.example");
+        assert_eq!(config.port, 587);
+        assert_eq!(config.security, rclone_backup_core::SmtpSecurity::Starttls);
+        assert_eq!(config.from, "alice@example.com");
+        assert_eq!(config.username, "alice@example.com");
+        assert_eq!(config.password, "test-secret");
+        assert_eq!(config.to, "receiver@example.com");
+        assert!(config.smtp_options.is_empty());
         assert!(input.validate().is_ok());
     }
 

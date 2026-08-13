@@ -66,9 +66,9 @@ docker exec -it rclone-backup rclone config
 
 ## Notifications
 
-The Web UI has one global notification module shared by every manual and scheduled backup. Ping, SMTP, and ServerChan can be enabled independently, each with start, success, and failure event choices and a test action. Notification secrets are encrypted in SQLite and masked in API responses.
+The Web UI has one global notification module shared by every manual and scheduled backup. Ping, Email, ServerChan, and ntfy targets can be added more than once, each with start, success, and failure event choices and an independent test action. Notification secrets are encrypted in SQLite and masked in API responses.
 
-SMTP delivery requires an explicit public `smtp://` or `smtps://` server and a sender address in the SMTP options, for example `-S mta=smtps://smtp.example.com -S from=backup@example.com`. Direct SMTP connections and HTTP notification endpoints are pinned to the public IP addresses resolved during validation to prevent internal-network requests and DNS rebinding.
+Email targets use standard SMTP fields for host, port, STARTTLS or TLS, sender, credentials, and recipient. Delivery uses the native Rust `lettre` mail client rather than invoking curl. Direct SMTP connections and HTTP notification endpoints are pinned to the public IP addresses resolved during validation to prevent internal-network requests and DNS rebinding. The legacy `MAIL_SMTP_VARIABLES` environment variable remains supported only for the first environment import and is converted into the standard fields.
 
 When upgrading, identical notification settings from old plans are migrated automatically. If plans contain different settings, notifications stay disabled until an administrator selects one of the listed source plans or saves a new global configuration. The old values remain in encrypted plan documents for rollback, but runtime delivery only uses the confirmed global configuration.
 

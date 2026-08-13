@@ -631,6 +631,7 @@ async fn update_notifications(
     let existing = state.store.notification_settings().await?;
     let mut config = input.config;
     config.merge_redacted_from(&existing.config);
+    config.normalize_email_targets();
     config.validate().map_err(ApiError::validation)?;
     config
         .validate_network_targets()
@@ -653,6 +654,7 @@ async fn test_notification(
     let existing = state.store.notification_settings().await?;
     let mut config = input.config.unwrap_or_else(|| existing.config.clone());
     config.merge_redacted_from(&existing.config);
+    config.normalize_email_targets();
     config.validate().map_err(ApiError::validation)?;
     config
         .validate_network_targets()
@@ -686,6 +688,9 @@ fn redact_notification_config(config: &mut NotificationConfig) {
                 }
             }
             NotificationTargetKind::Email { config } => {
+                if !config.password.is_empty() {
+                    config.password = REDACTED.into();
+                }
                 if !config.smtp_options.is_empty() {
                     config.smtp_options = vec![REDACTED.into()];
                 }
@@ -837,7 +842,9 @@ mod tests {
         same_origin_or_non_browser,
     };
     use axum::http::{HeaderMap, HeaderValue, header};
-    use rclone_backup_core::{GlobalNotificationSettings, NotificationConfig, REDACTED};
+    use rclone_backup_core::{
+        GlobalNotificationSettings, NotificationConfig, NotificationTargetKind, REDACTED,
+    };
     use serde_json::json;
 
     #[test]
@@ -943,6 +950,86 @@ mod tests {
         let mut public = stored.clone();
         redact_notification_config(&mut public);
         assert_eq!(public.mail.smtp_options, vec![REDACTED]);
+    }
+
+    #[test]
+    fn email_target_redaction_preserves_standard_smtp_fields() {
+        let mut stored = NotificationConfig {
+            targets: vec![rclone_backup_core::NotificationTarget {
+                id: "mail".into(),
+                name: "Email".into(),
+                enabled: true,
+                on_start: false,
+                on_success: true,
+                on_failure: true,
+                kind: NotificationTargetKind::Email {
+                    config: rclone_backup_core::MailTargetConfig {
+                        host: "smtp.example.com".into(),
+                        port: 587,
+                        security: rclone_backup_core::SmtpSecurity::Starttls,
+                        from: "sender@example.com".into(),
+                        username: "sender@example.com".into(),
+                        password: "secret".into(),
+                        to: "receiver@example.com".into(),
+                        ..Default::default()
+                    },
+                },
+            }],
+            ..Default::default()
+        };
+        let original = stored.clone();
+
+        redact_notification_config(&mut stored);
+        let NotificationTargetKind::Email { config } = &stored.targets[0].kind else {
+            panic!("expected email target");
+        };
+        assert_eq!(config.host, "smtp.example.com");
+        assert_eq!(config.from, "sender@example.com");
+        assert_eq!(config.username, "sender@example.com");
+        assert_eq!(config.to, "receiver@example.com");
+        assert_eq!(config.password, REDACTED);
+
+        stored.merge_redacted_from(&original);
+        assert_eq!(stored, original);
+    }
+
+    #[test]
+    fn legacy_email_target_is_normalized_before_response_redaction() {
+        let mut config = NotificationConfig {
+            targets: vec![rclone_backup_core::NotificationTarget {
+                id: "legacy-mail".into(),
+                name: "Email".into(),
+                enabled: true,
+                on_start: false,
+                on_success: true,
+                on_failure: true,
+                kind: NotificationTargetKind::Email {
+                    config: rclone_backup_core::MailTargetConfig {
+                        smtp_options: vec![
+                            "-S".into(),
+                            "mta=smtps://smtp.example.com:465".into(),
+                            "-S".into(),
+                            "from=sender@example.com".into(),
+                            "-S".into(),
+                            "smtp-auth-user=sender@example.com".into(),
+                            "-S".into(),
+                            "smtp-auth-password=secret".into(),
+                        ],
+                        to: "receiver@example.com".into(),
+                        ..Default::default()
+                    },
+                },
+            }],
+            ..Default::default()
+        };
+
+        config.normalize_email_targets();
+        redact_notification_config(&mut config);
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("secret"));
+        assert!(!json.contains("smtp_options"));
+        assert!(json.contains("smtp.example.com"));
+        assert!(json.contains(REDACTED));
     }
 
     #[test]

@@ -1,10 +1,17 @@
 use anyhow::{Context, bail};
+use lettre::{
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    transport::smtp::{
+        authentication::Credentials,
+        client::{Tls, TlsParameters},
+    },
+};
 use rclone_backup_core::{
     MailConfig, NotificationConfig, NotificationTarget, NotificationTargetKind, NtfyTargetConfig,
     PingConfig, ResolvedTarget, ServerChanChannel, resolve_public_url,
 };
 use std::{collections::HashMap, process::Stdio};
-use tokio::{io::AsyncWriteExt, process::Command};
+use tokio::process::Command;
 
 pub use rclone_backup_core::{MailTargetConfig, PingTargetConfig, ServerChanTargetConfig};
 
@@ -168,33 +175,48 @@ async fn send_mail(
 ) -> Result<(), String> {
     let options = mail_options(&mail.smtp_options)?;
     let subject = subject(plan_name, event);
-    let mut command = pinned_curl_command(&options.server, "SMTP")
-        .await?
-        .args([
-            "--noproxy",
-            "*",
-            "--connect-timeout",
-            "15",
-            "--max-time",
-            "30",
-            "--fail",
-        ])
-        .arg("--mail-from")
-        .arg(&options.from)
-        .arg("--mail-rcpt")
-        .arg(&mail.to)
-        .arg("--upload-file")
-        .arg("-")
-        .stdin(format!(
-            "To: {}\r\nFrom: {}\r\nSubject: {}\r\n\r\n{}\r\n",
-            mail.to, options.from, subject, content
-        ))
-        .arg("--ssl-reqd");
-    if let Some(credentials) = options.credentials {
-        command = command.arg("--user").arg(&credentials).secret(&credentials);
+    let server = url::Url::parse(&options.server).map_err(|error| error.to_string())?;
+    let host = server
+        .host_str()
+        .ok_or_else(|| "SMTP server host is required".to_owned())?;
+    let port = server
+        .port_or_known_default()
+        .unwrap_or(if server.scheme() == "smtps" { 465 } else { 587 });
+    let resolved = resolve_public_url(&options.server, "SMTP").await?;
+    let address = resolved
+        .addresses
+        .first()
+        .ok_or_else(|| "SMTP server did not resolve to a public address".to_owned())?;
+    let tls_parameters = TlsParameters::new(host.to_owned()).map_err(|error| error.to_string())?;
+    let tls = if server.scheme() == "smtps" {
+        Tls::Wrapper(tls_parameters)
+    } else {
+        Tls::Required(tls_parameters)
+    };
+    let mut transport =
+        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(address.to_string())
+            .port(port)
+            .tls(tls)
+            .timeout(Some(std::time::Duration::from_secs(30)));
+    let message = Message::builder()
+        .from(
+            options
+                .from
+                .parse()
+                .map_err(|_| "SMTP from address is invalid")?,
+        )
+        .to(mail.to.parse().map_err(|_| "SMTP recipient is invalid")?)
+        .subject(subject)
+        .body(content.to_owned())
+        .map_err(|error| error.to_string())?;
+    if let Some((username, password)) = options.credentials {
+        transport = transport.credentials(Credentials::new(username, password));
     }
-    run(command.arg(&options.server).secret(&options.server))
+    transport
+        .build()
+        .send(message)
         .await
+        .map(|_| ())
         .map_err(|error| error.to_string())
 }
 
@@ -277,7 +299,6 @@ async fn send_ntfy(
 #[derive(Clone)]
 struct CommandSpec {
     args: Vec<String>,
-    stdin: Option<String>,
     secrets: Vec<String>,
 }
 
@@ -285,7 +306,6 @@ impl CommandSpec {
     fn new() -> Self {
         Self {
             args: Vec::new(),
-            stdin: None,
             secrets: Vec::new(),
         }
     }
@@ -302,10 +322,6 @@ impl CommandSpec {
             .extend(values.into_iter().map(|value| value.as_ref().into()));
         self
     }
-    fn stdin(mut self, value: String) -> Self {
-        self.stdin = Some(value);
-        self
-    }
     fn secret(mut self, value: &str) -> Self {
         if !value.is_empty() {
             self.secrets.push(value.into());
@@ -320,17 +336,8 @@ async fn run(spec: CommandSpec) -> anyhow::Result<()> {
         .args(&spec.args)
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    command.stdin(if spec.stdin.is_some() {
-        Stdio::piped()
-    } else {
-        Stdio::null()
-    });
-    let mut child = command.spawn().context("start curl")?;
-    if let Some(input) = spec.stdin
-        && let Some(stdin) = &mut child.stdin
-    {
-        stdin.write_all(input.as_bytes()).await?;
-    }
+    command.stdin(Stdio::null());
+    let child = command.spawn().context("start curl")?;
     let output = child.wait_with_output().await?;
     if !output.status.success() {
         let message = redact(&String::from_utf8_lossy(&output.stderr), &spec.secrets);
@@ -372,7 +379,7 @@ fn pinned_command(target: &ResolvedTarget, scheme: &str) -> CommandSpec {
 struct MailOptions {
     server: String,
     from: String,
-    credentials: Option<String>,
+    credentials: Option<(String, String)>,
 }
 
 fn mail_options(options: &[String]) -> Result<MailOptions, String> {
@@ -403,7 +410,7 @@ fn mail_options(options: &[String]) -> Result<MailOptions, String> {
         values.remove("smtp-auth-user"),
         values.remove("smtp-auth-password"),
     ) {
-        (Some(user), Some(password)) => Some(format!("{user}:{password}")),
+        (Some(user), Some(password)) => Some((user, password)),
         (None, None) => None,
         _ => return Err("SMTP user and password must be configured together".into()),
     };

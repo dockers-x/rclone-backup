@@ -145,10 +145,11 @@ impl Store {
             sqlx::query_as("SELECT document FROM settings WHERE key = 'notifications'")
                 .fetch_optional(&self.pool)
                 .await?;
-        let settings: GlobalNotificationSettings = row
+        let mut settings: GlobalNotificationSettings = row
             .map(|(document,)| self.decode_document(&document, "notification settings"))
             .transpose()?
             .unwrap_or_default();
+        settings.config.normalize_email_targets();
         Ok(settings)
     }
 

@@ -172,8 +172,9 @@ main { width: min(1320px, 100%); margin: 0 auto; padding: 54px clamp(20px, 4vw, 
 .fact + .fact { padding-left: 12px; border-left: 1px solid var(--border); }
 .fact span { display: block; color: var(--text-tertiary); font-size: 11px; }
 .fact strong { display: block; margin-top: 3px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.plan-actions { display: flex; align-items: center; gap: 8px; }
-.plan-actions .button:first-child { margin-right: auto; }
+.plan-actions { display: flex; align-items: center; gap: 10px; }
+.plan-actions .button:first-child { margin-right: auto; gap: 8px; padding-inline: 18px; }
+.plan-actions .icon-button { flex: 0 0 44px; }
 .empty-state { padding: 58px 24px; text-align: center; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface-soft); }
 .empty-state h3 { margin: 15px 0 5px; }
 .empty-state p { margin: 0 auto 22px; max-width: 480px; color: var(--text-secondary); }

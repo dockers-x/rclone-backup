@@ -938,7 +938,11 @@ impl LogBuffer {
                     );
                 }
                 NotificationTargetKind::Email { config } => {
-                    secrets.extend(config.smtp_options.iter().cloned());
+                    secrets.extend([
+                        config.password.clone(),
+                        config.username.clone(),
+                        config.from.clone(),
+                    ]);
                     secrets.push(config.to.clone());
                 }
                 NotificationTargetKind::ServerChan { config } => {
