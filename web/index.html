@@ -39,7 +39,7 @@
         <a class="nav-item" href="/notifications" data-page-link="notifications"><svg><use href="#i-bell"/></svg><span data-i18n="notifications">通知配置</span></a>
         <a class="nav-item" href="/history" data-page-link="history"><svg><use href="#i-history"/></svg><span data-i18n="history">运行历史</span></a>
       </nav>
-      <div class="sidebar-foot"><span class="status-dot"></span><span data-i18n="serviceOnline">服务在线</span><small id="version">v2.0.2</small></div>
+      <div class="sidebar-foot"><span class="status-dot"></span><span data-i18n="serviceOnline">服务在线</span><small id="version">v2.0.6</small></div>
     </aside>
 
     <div class="workspace">
@@ -192,7 +192,6 @@
     <form id="remoteForm">
       <header class="dialog-header"><div><p class="eyebrow">RCLONE REMOTE</p><h2 id="remoteDialogTitle" data-i18n="configureStorage">配置存储</h2></div><button class="icon-button" type="button" data-action="close-remote" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
       <div class="dialog-body">
-        <div class="wizard-steps" aria-label="Steps"><span class="active">1</span><i></i><span>2</span><i></i><span>3</span></div>
         <p class="wizard-intro" data-i18n="storageIntro">选择存储提供商，输入 rclone 别名和该服务要求的凭据。敏感字段直接交给 rclone 加密保存。</p>
         <div class="form-error" id="remoteError" role="alert" hidden></div>
         <div class="form-grid">
@@ -202,10 +201,14 @@
         <div class="provider-description" id="providerDescription"></div>
         <div class="provider-fields form-grid" id="providerFields"></div>
         <div class="provider-fields form-grid" id="remoteFlowFields"></div>
+        <div class="provider-add-field" id="providerAddField" hidden>
+          <label class="field"><span data-i18n="addConfigurationItem">添加配置项</span><select id="providerOptionSelect"><option value="" data-i18n="chooseConfigurationItem">选择需要添加的配置项…</option></select></label>
+          <button class="button ghost" type="button" data-action="add-provider-option" data-i18n="add">添加</button>
+        </div>
         <details class="advanced-provider" id="advancedProvider" hidden><summary data-i18n="advancedOptions">高级选项</summary><div class="provider-fields form-grid" id="advancedProviderFields"></div></details>
-        <div class="remote-result" id="remoteResult" hidden></div>
+        <div class="remote-result" id="remoteResult" role="status" aria-live="polite" hidden></div>
       </div>
-      <footer class="dialog-footer"><button type="button" class="button ghost" data-action="close-remote" data-i18n="cancel">取消</button><button class="button primary" type="submit" id="remoteSaveButton" data-i18n="saveAndTest">保存并测试</button></footer>
+      <footer class="dialog-footer"><button type="button" class="button ghost" data-action="close-remote" data-i18n="cancel">取消</button><button class="button primary" type="submit" id="remoteSaveButton"><span data-i18n="saveAndTest">保存并测试</span></button></footer>
     </form>
   </dialog>
 

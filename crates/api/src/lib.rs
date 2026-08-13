@@ -180,8 +180,13 @@ async fn rclone_providers(State(state): State<AppState>) -> ApiResult<Json<serde
     Ok(Json(state.runner.rclone_providers().await?))
 }
 
-async fn rclone_remotes(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
-    Ok(Json(state.runner.rclone_remotes().await?))
+async fn rclone_remotes(State(state): State<AppState>) -> ApiResult<Response> {
+    let body = serde_json::to_vec(&state.runner.rclone_remotes().await?)?;
+    Ok(Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(body))
+        .expect("rclone remote response is valid"))
 }
 
 #[derive(Deserialize)]
@@ -252,10 +257,11 @@ async fn create_rclone_remote(
             .create_rclone_remote(&input.name, &input.provider_type, input.parameters)
             .await?
     };
-    let needs_more_input = remote_needs_input(&response);
-    if !needs_more_input {
-        state.runner.test_rclone_remote(&input.name).await?;
-    }
+    let response = if remote_needs_input(&response) {
+        response
+    } else {
+        remote_write_result(response, state.runner.test_rclone_remote(&input.name).await)
+    };
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -307,8 +313,30 @@ async fn update_rclone_remote(
         .runner
         .update_rclone_remote(&name, input.parameters)
         .await?;
-    state.runner.test_rclone_remote(&name).await?;
-    Ok(Json(response))
+    Ok(Json(remote_write_result(
+        response,
+        state.runner.test_rclone_remote(&name).await,
+    )))
+}
+
+fn remote_write_result(
+    response: serde_json::Value,
+    verification: anyhow::Result<()>,
+) -> serde_json::Value {
+    let verified = verification.is_ok();
+    if let Err(error) = verification {
+        tracing::warn!(%error, "rclone configuration was saved but connection verification failed");
+    }
+    let mut response = response.as_object().cloned().unwrap_or_default();
+    response.insert("saved".into(), json!(true));
+    response.insert("verified".into(), json!(verified));
+    if !verified {
+        response.insert(
+            "verification_error".into(),
+            json!("configuration saved, but the connection test failed"),
+        );
+    }
+    serde_json::Value::Object(response)
 }
 
 async fn ensure_plan_aliases(state: &AppState, input: &PlanInput) -> ApiResult<()> {
@@ -838,8 +866,8 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::{
         FRONTEND_ROUTES, NotificationUpdateResponse, archive_password_response,
-        redact_notification_config, remote_needs_input, require_password_reveal_auth,
-        same_origin_or_non_browser,
+        redact_notification_config, remote_needs_input, remote_write_result,
+        require_password_reveal_auth, same_origin_or_non_browser,
     };
     use axum::http::{HeaderMap, HeaderValue, header};
     use rclone_backup_core::{
@@ -881,6 +909,22 @@ mod tests {
             "State": "choose",
             "Option": { "Name": "answer" }
         })));
+    }
+
+    #[test]
+    fn remote_write_response_distinguishes_saved_from_verified() {
+        let verified = remote_write_result(json!({}), Ok(()));
+        assert_eq!(verified["saved"], true);
+        assert_eq!(verified["verified"], true);
+        assert!(verified.get("verification_error").is_none());
+
+        let unverified = remote_write_result(json!({}), Err(anyhow::anyhow!("offline")));
+        assert_eq!(unverified["saved"], true);
+        assert_eq!(unverified["verified"], false);
+        assert_eq!(
+            unverified["verification_error"],
+            "configuration saved, but the connection test failed"
+        );
     }
 
     #[test]

@@ -35,11 +35,12 @@ const translations = {
     rcloneWaiting: "等待配置存储", rcloneWaitingHint: "服务会保持运行，但在检测到至少一个 rclone 远端前不会启动任何备份任务。",
     configureStorage: "配置存储", storageIntro: "选择存储提供商，输入 rclone 别名和该服务要求的凭据。敏感字段直接交给 rclone 加密保存。",
     rcloneAlias: "Rclone 别名", provider: "存储提供商", loadingProviders: "正在加载提供商…",
-    advancedOptions: "高级选项", saveAndTest: "保存并测试", providerRequired: "请选择存储提供商。",
+    advancedOptions: "高级选项", saveAndTest: "保存并测试", savingAndTesting: "正在保存并测试…", providerRequired: "请选择存储提供商。",
+    addConfigurationItem: "添加配置项", chooseConfigurationItem: "选择需要添加的配置项…", configuredSecret: "已配置，留空保持不变", remoteSavedVerified: "配置已写入，并通过连接验证。", remoteSavedUnverified: "配置已写入，但连接验证失败。请检查参数后重试测试。",
     remoteCreated: "存储配置已保存，正在测试连接…", remoteReady: "存储连接成功。调度器已解锁。",
     remoteNeedsInput: "rclone 需要更多信息，请完成下方步骤。", authenticationOff: "认证未启用",
     storageAccounts: "存储账号", addAccount: "添加账号", accountBoundary: "账号和密钥只保存在 rclone 配置文件中；备份数据库仅引用别名。", noAccounts: "还没有存储账号", noAccountsHint: "添加一个 rclone 远端，连接 S3、WebDAV、SFTP 或其他提供商。",
-    test: "测试", testSuccess: "连接测试成功", remoteDeleteConfirm: "确定删除这个存储账号吗？", remoteDeleted: "存储账号已删除", remoteEditHint: "为保护已有凭据，编辑时只提交需要变更的字段。", remoteUpdate: "编辑账号",
+    test: "测试", testSuccess: "连接测试成功", remoteDeleteConfirm: "确定删除这个存储账号吗？", remoteDeleted: "存储账号已删除", remoteEditHint: "仅显示当前使用的配置。敏感值不会回显，留空即可保持原值。", remoteUpdate: "编辑账号",
     runStatus: "运行状态", phase: "当前阶段", attemptLabel: "第 {current}/{total} 次尝试", targetProgress: "存储目标", showPassword: "显示密码", hidePassword: "隐藏密码",
     pending: "等待中", checking: "检查连接", ready: "连接可用", uploading: "上传中", success: "成功", failed: "失败", unavailable: "不可用", running: "运行中", retrying: "等待重试",
     checking_destinations: "检查存储目标", preparing_files: "准备文件", creating_archive: "创建归档", retention: "执行保留策略", completed: "备份完成",
@@ -81,11 +82,12 @@ const translations = {
     rcloneWaiting: "Waiting for storage setup", rcloneWaitingHint: "The service stays online, but no backup can start until at least one rclone remote is detected.",
     configureStorage: "Configure storage", storageIntro: "Choose a provider, an rclone alias, and the credentials required by that service. Sensitive values go directly to rclone for encrypted storage.",
     rcloneAlias: "Rclone alias", provider: "Storage provider", loadingProviders: "Loading providers…",
-    advancedOptions: "Advanced options", saveAndTest: "Save & test", providerRequired: "Choose a storage provider.",
+    advancedOptions: "Advanced options", saveAndTest: "Save & test", savingAndTesting: "Saving & testing…", providerRequired: "Choose a storage provider.",
+    addConfigurationItem: "Add configuration item", chooseConfigurationItem: "Choose an item to add…", configuredSecret: "Configured. Leave blank to keep it unchanged", remoteSavedVerified: "Configuration written and connection verified.", remoteSavedUnverified: "Configuration was written, but connection verification failed. Check the values and test again.",
     remoteCreated: "Storage configuration saved. Testing connection…", remoteReady: "Storage connected. The scheduler is now unlocked.",
     remoteNeedsInput: "rclone needs more information. Complete the next step below.", authenticationOff: "Authentication disabled",
     storageAccounts: "Storage accounts", addAccount: "Add account", accountBoundary: "Accounts and credentials live only in rclone.conf; the backup database stores alias references only.", noAccounts: "No storage accounts yet", noAccountsHint: "Add an rclone remote for S3, WebDAV, SFTP, or another provider.",
-    test: "Test", testSuccess: "Connection test passed", remoteDeleteConfirm: "Delete this storage account?", remoteDeleted: "Storage account deleted", remoteEditHint: "To protect existing credentials, editing submits only fields you choose to change.", remoteUpdate: "Edit account",
+    test: "Test", testSuccess: "Connection test passed", remoteDeleteConfirm: "Delete this storage account?", remoteDeleted: "Storage account deleted", remoteEditHint: "Only settings used by this remote are shown. Secrets are never returned; leave them blank to keep the saved value.", remoteUpdate: "Edit account",
     runStatus: "Run status", phase: "Current stage", attemptLabel: "Attempt {current}/{total}", targetProgress: "Storage targets", showPassword: "Show password", hidePassword: "Hide password",
     pending: "Pending", checking: "Checking", ready: "Ready", uploading: "Uploading", success: "Succeeded", failed: "Failed", unavailable: "Unavailable", running: "Running", retrying: "Retrying",
     checking_destinations: "Checking destinations", preparing_files: "Preparing files", creating_archive: "Creating archive", retention: "Applying retention", completed: "Backup completed",
@@ -99,7 +101,7 @@ const translations = {
 const state = {
   language: localStorage.getItem("language") || (navigator.language.startsWith("zh") ? "zh" : "en"),
   theme: localStorage.getItem("theme") || "system",
-  plans: [], runs: [], remotes: [], notifications: null, notificationTargets: [], expandedNotificationId: null, status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, openRunId: null, page: "plans",
+  plans: [], runs: [], remotes: [], notifications: null, notificationTargets: [], expandedNotificationId: null, status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, remoteVisibleOptions: new Set(), openRunId: null, page: "plans",
 };
 
 const pageRoutes = {
@@ -144,6 +146,7 @@ function applyPreferences() {
   const passwordToggle = $("[data-action=\"toggle-password\"]");
   if (passwordToggle) passwordToggle.setAttribute("aria-label", t(passwordToggle.getAttribute("aria-pressed") === "true" ? "hidePassword" : "showPassword"));
   if ($("#planDialog")?.open) { updateArchiveHint(); updateScheduleBuilder(); }
+  if ($("#remoteDialog")?.open) $("#remoteDialogTitle").textContent = state.editingRemote ? t("remoteUpdate") : t("configureStorage");
   renderPage(state.page);
 }
 
@@ -616,6 +619,7 @@ async function openRemoteWizard(remote = null) {
   $("#advancedProvider").hidden = true;
   state.remoteFlow = null;
   state.editingRemote = remote;
+  state.remoteVisibleOptions = new Set();
   $("#remoteForm").reset();
   $("#remoteDialogTitle").textContent = remote ? t("remoteUpdate") : t("configureStorage");
   dialog.showModal();
@@ -630,6 +634,7 @@ async function openRemoteWizard(remote = null) {
       $("#remoteForm").elements.remote_name.value = remote.name;
       $("#remoteForm").elements.remote_name.readOnly = true;
       select.value = remote.type;
+      if (select.selectedOptions[0]) select.selectedOptions[0].textContent = remote.type === "webdav" ? "WebDAV" : remote.type.toUpperCase();
       select.disabled = true;
       selectProvider();
       $("#remoteResult").textContent = t("remoteEditHint");
@@ -655,34 +660,108 @@ function selectProvider() {
   $("#providerFields").innerHTML = "";
   $("#advancedProviderFields").innerHTML = "";
   $("#advancedProvider").hidden = true;
+  $("#providerAddField").hidden = true;
   if (!provider) return;
-  $("#providerDescription").textContent = provider.Description || provider.description || "";
+  $("#providerDescription").textContent = state.editingRemote ? "" : (provider.Description || provider.description || "");
   const options = provider.Options || provider.options || [];
-  options.forEach((option) => {
-    const advanced = option.Advanced ?? option.advanced ?? false;
-    const target = advanced ? $("#advancedProviderFields") : $("#providerFields");
-    target.append(providerField(option));
-  });
-  $("#advancedProvider").hidden = !$("#advancedProviderFields").children.length;
+  const parameters = state.editingRemote?.parameters || {};
+  const configuredSecrets = new Set(state.editingRemote?.configured_secrets || []);
+  state.remoteVisibleOptions = new Set(options.filter((option) => {
+    const name = option.Name || option.name;
+    return !state.editingRemote || Object.hasOwn(parameters, name) || configuredSecrets.has(name);
+  }).map((option) => option.Name || option.name));
+  Object.keys(parameters).forEach((name) => state.remoteVisibleOptions.add(name));
+  renderProviderFields(parameters);
 }
 
-function providerField(option) {
+function renderProviderFields(values = {}) {
+  const provider = state.selectedProvider;
+  if (!provider) return;
+  const options = provider.Options || provider.options || [];
+  const knownNames = new Set(options.map((option) => option.Name || option.name));
+  const configuredSecrets = new Set(state.editingRemote?.configured_secrets || []);
+  $("#providerFields").replaceChildren();
+  $("#advancedProviderFields").replaceChildren();
+  options.filter((option) => state.remoteVisibleOptions.has(option.Name || option.name)).forEach((option) => {
+    const name = option.Name || option.name;
+    const advanced = option.Advanced ?? option.advanced ?? false;
+    const target = advanced ? $("#advancedProviderFields") : $("#providerFields");
+    target.append(providerField(option, values[name], configuredSecrets.has(name)));
+  });
+  Object.entries(values).filter(([name]) => !knownNames.has(name)).forEach(([name, value]) => {
+    $("#advancedProviderFields").append(providerField({ Name: name, Help: name, Advanced: true }, value, false));
+  });
+  [...configuredSecrets].filter((name) => !knownNames.has(name)).forEach((name) => {
+    $("#advancedProviderFields").append(providerField({ Name: name, Help: name, Advanced: true, IsPassword: true }, "", true));
+  });
+  $("#advancedProvider").hidden = !$("#advancedProviderFields").children.length;
+  if (!$("#advancedProvider").hidden && state.editingRemote) $("#advancedProvider").open = true;
+  renderProviderOptionPicker(options);
+}
+
+function renderProviderOptionPicker(options) {
+  if (!state.editingRemote) return;
+  const available = options.filter((option) => !state.remoteVisibleOptions.has(option.Name || option.name));
+  const picker = $("#providerOptionSelect");
+  picker.innerHTML = `<option value="">${escapeHtml(t("chooseConfigurationItem"))}</option>` + available.map((option) => {
+    const name = option.Name || option.name;
+    return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
+  }).join("");
+  $("#providerAddField").hidden = available.length === 0;
+}
+
+function currentProviderValues() {
+  const values = {};
+  $$('[name^="provider_"]', $("#remoteForm")).forEach((input) => { values[input.name.slice(9)] = input.value; });
+  return values;
+}
+
+function providerFieldLabel(name) {
+  const labels = state.language === "zh" ? {
+    url: "网址", vendor: "WebDAV 类型", user: "用户名", pass: "密码", provider: "S3 服务商",
+    access_key_id: "Access Key ID", secret_access_key: "Secret Access Key", region: "区域",
+    endpoint: "Endpoint", location_constraint: "存储区域约束", acl: "访问权限",
+  } : {
+    url: "URL", vendor: "WebDAV vendor", user: "Username", pass: "Password", provider: "S3 provider",
+    access_key_id: "Access Key ID", secret_access_key: "Secret Access Key", region: "Region",
+    endpoint: "Endpoint", location_constraint: "Location constraint", acl: "ACL",
+  };
+  return labels[name] || name;
+}
+
+function providerFieldIsSecret(option, name) {
+  if (option.IsPassword ?? option.isPassword ?? option.Password ?? option.password ?? false) return true;
+  const normalized = name.toLowerCase();
+  const safeSensitiveIdentifiers = ["user", "username", "email", "access_key_id", "account_id", "client_id"];
+  const sensitive = option.Sensitive ?? option.sensitive ?? false;
+  if (sensitive && !safeSensitiveIdentifiers.includes(normalized)) return true;
+  return normalized === "pass" || normalized === "key" || normalized === "headers" || normalized.endsWith("_pass")
+    || normalized.includes("password") || normalized.includes("secret") || normalized.includes("token")
+    || normalized.includes("api_key") || (normalized.endsWith("_key") && !normalized.endsWith("public_key"))
+    || normalized.includes("private_key") || normalized.startsWith("private_") || normalized.includes("credentials")
+    || ["access_grant", "authorization", "connection_string", "cookies", "key_pem", "master_key", "master_keys", "mnemonic", "sas_url"].includes(normalized);
+}
+
+function providerField(option, existingValue, secretConfigured = false) {
   const name = option.Name || option.name;
   const label = option.Help || option.help || name;
   const required = !state.editingRemote && (option.Required ?? option.required ?? false);
-  const password = option.IsPassword ?? option.isPassword ?? option.Password ?? option.password ?? false;
+  const password = secretConfigured || providerFieldIsSecret(option, name);
   const examples = option.Examples || option.examples || [];
-  const defaultValue = state.editingRemote ? "" : (option.Default ?? option.default ?? "");
+  const defaultValue = existingValue ?? (state.editingRemote ? "" : (option.Default ?? option.default ?? ""));
   const field = document.createElement("label");
   field.className = "field";
   const title = document.createElement("span");
-  title.textContent = name + (required ? " *" : "");
+  title.textContent = providerFieldLabel(name) + (required ? " *" : "");
   field.append(title);
-  if (examples.length) {
+  if (examples.length && !password) {
     const select = document.createElement("select");
     select.name = `provider_${name}`;
     if (!required) select.append(new Option("—", ""));
     examples.forEach((example) => select.append(new Option(example.Help || example.help || String(example.Value ?? example.value), example.Value ?? example.value)));
+    if (defaultValue !== null && defaultValue !== undefined && defaultValue !== "" && ![...select.options].some((option) => option.value === String(defaultValue))) {
+      select.append(new Option(String(defaultValue), String(defaultValue)));
+    }
     if (defaultValue !== null && defaultValue !== undefined) select.value = String(defaultValue);
     select.required = required;
     field.append(select);
@@ -692,8 +771,29 @@ function providerField(option) {
     input.value = defaultValue === null || defaultValue === undefined ? "" : String(defaultValue);
     input.required = required;
     input.type = password ? "password" : "text";
-    if (password) input.autocomplete = "new-password";
-    field.append(input);
+    if (password) {
+      input.dataset.secret = "true";
+      input.dataset.configured = String(secretConfigured);
+      input.autocomplete = "new-password";
+      if (secretConfigured) input.placeholder = t("configuredSecret");
+      const wrapper = document.createElement("span");
+      wrapper.className = "password-field";
+      wrapper.append(input);
+      const toggle = document.createElement("button");
+      toggle.className = "password-toggle";
+      toggle.type = "button";
+      toggle.dataset.action = "toggle-provider-password";
+      toggle.setAttribute("aria-label", t("showPassword"));
+      toggle.setAttribute("aria-pressed", "false");
+      toggle.innerHTML = icon("eye");
+      wrapper.append(toggle);
+      field.append(wrapper);
+    } else field.append(input);
+  }
+  if (secretConfigured) {
+    const status = document.createElement("small");
+    status.textContent = t("configuredSecret");
+    field.append(status);
   }
   if (label && label !== name) {
     const help = document.createElement("small");
@@ -723,11 +823,16 @@ async function saveRemote(event) {
     return;
   }
   const button = $("#remoteSaveButton");
+  const buttonLabel = $("span", button);
   button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  buttonLabel.textContent = t("savingAndTesting");
+  $("#remoteError").hidden = true;
+  $("#remoteResult").hidden = true;
   try {
     const parameters = {};
     $$('[name^="provider_"]', form).forEach((input) => {
-      if (input.value !== "") parameters[input.name.slice(9)] = input.value;
+      if (input.value !== "" || (state.editingRemote && input.dataset.secret !== "true")) parameters[input.name.slice(9)] = input.value;
     });
     const name = form.elements.remote_name.value.trim();
     const providerType = state.selectedProvider.Name || state.selectedProvider.name || state.selectedProvider.Prefix || state.selectedProvider.prefix;
@@ -747,15 +852,28 @@ async function saveRemote(event) {
       toast(t("remoteNeedsInput"));
       return;
     }
-    toast(t("remoteCreated"));
-    if (!state.editingRemote) await api(`/api/rclone/remotes/${encodeURIComponent(name)}/test`, { method: "POST" });
-    toast(t("remoteReady"));
-    $("#remoteDialog").close();
+    const verified = result.verified === true;
+    $("#remoteResult").textContent = t(verified ? "remoteSavedVerified" : "remoteSavedUnverified");
+    $("#remoteResult").dataset.state = verified ? "success" : "warning";
+    $("#remoteResult").hidden = false;
+    $("#remoteResult").scrollIntoView({ block: "nearest", behavior: "auto" });
+    toast(t(verified ? "remoteSavedVerified" : "remoteSavedUnverified"), !result.saved);
     await loadAll();
+    state.editingRemote = state.remotes.find((remote) => remote.name === name) || state.editingRemote;
+    if (state.editingRemote) {
+      form.elements.remote_name.readOnly = true;
+      $("#providerSelect").disabled = true;
+      $("#remoteDialogTitle").textContent = t("remoteUpdate");
+      selectProvider();
+    }
   } catch (error) {
     $("#remoteError").textContent = error.message;
     $("#remoteError").hidden = false;
-  } finally { button.disabled = false; }
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    buttonLabel.textContent = t("saveAndTest");
+  }
 }
 
 document.addEventListener("click", async (event) => {
@@ -792,6 +910,15 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "add-source") appendRow("source");
   if (action === "add-remote") appendRow("remote");
+  if (action === "add-provider-option") {
+    const name = $("#providerOptionSelect").value;
+    if (name) {
+      const values = currentProviderValues();
+      state.remoteVisibleOptions.add(name);
+      renderProviderFields(values);
+      $(`[name="provider_${CSS.escape(name)}"]`, $("#remoteForm"))?.focus();
+    }
+  }
   if (action === "remove-row") button.closest(".repeat-row").remove();
   const card = button.closest(".plan-card");
   if (card && action === "edit") openPlan(state.plans.find((plan) => plan.id === card.dataset.id));
@@ -820,6 +947,15 @@ document.addEventListener("click", async (event) => {
       } catch (error) { toast(error.message, true); return; }
       finally { button.disabled = false; }
     }
+    const visible = input.type === "password";
+    input.type = visible ? "text" : "password";
+    button.setAttribute("aria-pressed", String(visible));
+    button.setAttribute("aria-label", t(visible ? "hidePassword" : "showPassword"));
+    button.innerHTML = icon(visible ? "eye-off" : "eye");
+    input.focus();
+  }
+  if (action === "toggle-provider-password") {
+    const input = button.closest(".password-field").querySelector("input");
     const visible = input.type === "password";
     input.type = visible ? "text" : "password";
     button.setAttribute("aria-pressed", String(visible));
@@ -868,7 +1004,7 @@ document.addEventListener("click", async (event) => {
     try { await api(`/api/rclone/remotes/${encodeURIComponent(account.dataset.name)}/test`, { method: "POST" }); toast(t("testSuccess")); }
     catch (error) { toast(error.message, true); } finally { button.disabled = false; }
   }
-  if (account && action === "edit-remote") openRemoteWizard({ name: account.dataset.name, type: account.dataset.type });
+  if (account && action === "edit-remote") openRemoteWizard(state.remotes.find((remote) => remote.name === account.dataset.name));
   if (account && action === "delete-remote" && confirm(t("remoteDeleteConfirm"))) {
     try { await api(`/api/rclone/remotes/${encodeURIComponent(account.dataset.name)}`, { method: "DELETE" }); toast(t("remoteDeleted")); await loadAll(); }
     catch (error) { toast(error.message, true); }

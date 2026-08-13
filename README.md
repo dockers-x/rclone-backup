@@ -26,7 +26,7 @@ docker run -d \
   -p 127.0.0.1:8080:8080 \
   -v rclone-backup-data:/config \
   -v /path/to/backup:/data:ro \
-  czyt/rclone-backup:2.0.3
+  czyt/rclone-backup:2.0.6
 ```
 
 Open `http://127.0.0.1:8080`. On a fresh installation the service displays the storage wizard and remains running. Scheduled and manual backups stay locked until at least one working rclone alias exists.
@@ -54,7 +54,7 @@ rclone copy MyAlias:/RcloneBackup/backup-20260813 ./restore
 
 ## Storage accounts
 
-The Web UI gets provider options from the bundled rclone API and writes credentials directly to rclone's configuration file. The application database stores only remote aliases referenced by plans. APIs never return provider credential fields.
+The Web UI gets provider options from the bundled rclone API and writes credentials directly to rclone's configuration file. The application database stores only remote aliases referenced by plans. The remote editor returns non-secret configuration values and credential identifiers such as usernames or access-key IDs; passwords, secret keys, and tokens are never returned, only their configured state.
 
 The private rclone RC service listens only on `127.0.0.1:5572`, uses random per-process credentials, and is not exposed by the public API. The Web server invokes allow-listed rclone operations through this private API.
 

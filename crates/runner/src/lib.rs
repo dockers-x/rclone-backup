@@ -105,10 +105,20 @@ impl Runner {
     }
 
     pub async fn test_rclone_remote(&self, name: &str) -> anyhow::Result<()> {
-        self.rc
-            .run_command("lsd", vec![format!("{name}:")], vec![])
+        let check = self.rc.run_command(
+            "lsd",
+            vec![format!("{name}:")],
+            vec![
+                "--contimeout=8s".into(),
+                "--timeout=15s".into(),
+                "--retries=1".into(),
+                "--low-level-retries=1".into(),
+            ],
+        );
+        tokio::time::timeout(Duration::from_secs(25), check)
             .await
-            .map(|_| ())
+            .map_err(|_| anyhow!("rclone connection test timed out after 25 seconds"))??;
+        Ok(())
     }
 
     pub async fn test_notification(

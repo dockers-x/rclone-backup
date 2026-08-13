@@ -306,13 +306,11 @@ dialog { color: var(--text); }
 .remote-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
 .remote-dialog form { max-height: inherit; display: flex; flex-direction: column; }
 .remote-dialog .dialog-body { min-height: 380px; }
-.wizard-steps { margin: 12px auto 24px; display: flex; align-items: center; justify-content: center; }
-.wizard-steps span { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--text-tertiary); font: 600 11px "Fira Code", monospace; }
-.wizard-steps span.active { color: #fff; border-color: var(--accent-strong); background: var(--accent-strong); }
-.wizard-steps i { width: 56px; height: 1px; background: var(--border); }
 .wizard-intro { margin: 0 0 20px; color: var(--text-secondary); font-size: 13px; }
 .provider-description { margin: 14px 0 0; color: var(--text-tertiary); font-size: 12px; }
 .provider-fields { margin-top: 18px; }
+.provider-add-field { margin-top: 18px; padding-top: 18px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; border-top: 1px solid var(--border); }
+.provider-add-field[hidden] { display: none; }
 .advanced-provider { margin-top: 18px; border-top: 1px solid var(--border); }
 .advanced-provider summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; color: var(--text-secondary); font-size: 13px; font-weight: 600; }
 .notification-panel { display: grid; gap: 14px; }
@@ -374,7 +372,9 @@ dialog { color: var(--text); }
 .candidate-feedback li + li { margin-top: 4px; }
 .candidate-error { margin: 0 0 16px; }
 .candidate-list .button[data-state="success"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); background: var(--success-soft); }
-.remote-result { margin-top: 18px; padding: 13px; border-radius: 10px; color: var(--accent); background: var(--accent-soft); font-size: 13px; white-space: pre-wrap; }
+.remote-result { margin-top: 18px; padding: 13px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 10px; color: var(--accent-strong); background: var(--accent-soft); font-size: 13px; white-space: pre-wrap; }
+.remote-result[data-state="success"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, var(--border)); background: var(--success-soft); }
+.remote-result[data-state="warning"] { color: var(--accent-strong); }
 .toast-region { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); z-index: 40; display: grid; gap: 8px; pointer-events: none; }
 .toast { max-width: min(380px, calc(100vw - 40px)); padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: 13px; transition: opacity 160ms ease, transform 180ms var(--ease-out); }
 .toast.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
@@ -449,6 +449,8 @@ dialog { color: var(--text); }
   .dialog-header, .dialog-footer { padding-inline: 16px; }
   .dialog-body { padding-inline: 16px; }
   .form-grid { grid-template-columns: 1fr; }
+  .provider-add-field { grid-template-columns: 1fr; }
+  .provider-add-field .button { width: 100%; }
   .span-2 { grid-column: auto; }
   .repeat-row { display: grid; grid-template-columns: 1fr 44px; }
   .repeat-row .field, .repeat-row .grow { width: auto; grid-column: 1 / -1; }
