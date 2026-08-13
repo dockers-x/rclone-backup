@@ -7,9 +7,17 @@ services:
     volumes:
       - rclone-backup-data:/config
       - /path/to/backup:/data:ro
+    # Optional Web Basic Auth. Set the user and one password source.
+    # For an HTTPS reverse proxy, keep the host port bound to loopback as below.
+    # environment:
+    #   RCLONE_BACKUP_USER: admin
+    #   RCLONE_BACKUP_PASSWORD: change-me
+    # Or use a Docker secret instead of a plaintext password:
+    #   RCLONE_BACKUP_PASSWORD_FILE: /run/secrets/web-password
+    # secrets:
+    #   - web-password
     # Existing v1 environment variables can remain here. They are imported
     # exactly once when the v2 database is empty, then the Web UI takes over.
-    # environment:
     #   BACKUP_FOLDER_NAME: data
     #   BACKUP_FOLDER_PATH: /data
     #   RCLONE_REMOTE_NAME: MyRemote
@@ -19,3 +27,7 @@ services:
 
 volumes:
   rclone-backup-data:
+
+# secrets:
+#   web-password:
+#     file: ./web-password.txt
