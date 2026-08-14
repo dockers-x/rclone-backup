@@ -105,6 +105,7 @@ const state = {
   theme: localStorage.getItem("theme") || "system",
   plans: [], runs: [], remotes: [], notifications: null, notificationTargets: [], expandedNotificationId: null, status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, remoteVisibleOptions: new Set(), openRunId: null, page: "plans",
 };
+let providerDatalistSequence = 0;
 
 const pageRoutes = {
   plans: { path: "/plans", title: "backupPlans" },
@@ -763,7 +764,7 @@ function renderProviderFields(values = {}) {
     const name = option.Name || option.name;
     const advanced = option.Advanced ?? option.advanced ?? false;
     const target = advanced ? $("#advancedProviderFields") : $("#providerFields");
-    target.append(providerField(option, values[name], configuredSecrets.has(name)));
+    target.append(providerField(option, values[name], configuredSecrets.has(name), values));
   });
   Object.entries(values).filter(([name]) => !knownNames.has(name)).forEach(([name, value]) => {
     $("#advancedProviderFields").append(providerField({ Name: name, Help: name, Advanced: true }, value, false));
@@ -793,6 +794,41 @@ function currentProviderValues() {
   return values;
 }
 
+function providerOptionExamples(option, values = {}) {
+  const selectedProvider = String(values.provider || "");
+  const examples = option.Examples || option.examples || [];
+  const filtered = examples.filter((example) => {
+    const providers = example.Provider ?? example.provider;
+    if (!providers || !selectedProvider) return true;
+    return String(providers).split(",").map((provider) => provider.trim()).includes(selectedProvider);
+  });
+  const seen = new Set();
+  return filtered.filter((example) => {
+    const value = String(example.Value ?? example.value ?? "");
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
+function providerOptionUsesSelect(option, password) {
+  if (password) return false;
+  const exclusive = option.Exclusive ?? option.exclusive ?? false;
+  const type = String(option.Type ?? option.type ?? "").toLowerCase();
+  return exclusive || type === "bool" || type === "tristate";
+}
+
+function providerOptionValue(option, value) {
+  const type = String(option.Type ?? option.type ?? "").toLowerCase();
+  if (type === "tristate" && value && typeof value === "object") {
+    const valid = value.Valid ?? value.valid ?? false;
+    return valid ? String(value.Value ?? value.value ?? "") : "";
+  }
+  if (Array.isArray(value)) return value.join(type === "spaceseplist" ? " " : ",");
+  if (value !== null && typeof value === "object") return "";
+  return value;
+}
+
 function providerFieldLabel(name) {
   const labels = state.language === "zh" ? {
     url: "网址", vendor: "WebDAV 类型", user: "用户名", pass: "密码", provider: "S3 服务商",
@@ -819,23 +855,30 @@ function providerFieldIsSecret(option, name) {
     || ["access_grant", "authorization", "connection_string", "cookies", "key_pem", "master_key", "master_keys", "mnemonic", "sas_url"].includes(normalized);
 }
 
-function providerField(option, existingValue, secretConfigured = false) {
+function providerField(option, existingValue, secretConfigured = false, values = {}) {
   const name = option.Name || option.name;
   const label = option.Help || option.help || name;
   const required = !state.editingRemote && (option.Required ?? option.required ?? false);
   const password = secretConfigured || providerFieldIsSecret(option, name);
-  const examples = option.Examples || option.examples || [];
-  const defaultValue = existingValue ?? (state.editingRemote ? "" : (option.Default ?? option.default ?? ""));
+  const examples = providerOptionExamples(option, values);
+  const rawDefaultValue = existingValue ?? (state.editingRemote ? "" : (option.Default ?? option.default ?? ""));
+  const defaultValue = providerOptionValue(option, rawDefaultValue);
   const field = document.createElement("label");
   field.className = "field";
   const title = document.createElement("span");
   title.textContent = providerFieldLabel(name) + (required ? " *" : "");
   field.append(title);
-  if (examples.length && !password) {
+  if (providerOptionUsesSelect(option, password)) {
     const select = document.createElement("select");
+    select.classList.add("sui-select");
     select.name = `provider_${name}`;
-    if (!required) select.append(new Option("—", ""));
-    examples.forEach((example) => select.append(new Option(example.Help || example.help || String(example.Value ?? example.value), example.Value ?? example.value)));
+    const type = String(option.Type ?? option.type ?? "").toLowerCase();
+    const choices = examples.length ? examples : (type === "bool" || type === "tristate" ? [
+      { Help: "false", Value: "false" },
+      { Help: "true", Value: "true" },
+    ] : []);
+    if (!required && !choices.some((example) => String(example.Value ?? example.value ?? "") === "")) select.append(new Option("—", ""));
+    choices.forEach((example) => select.append(new Option(example.Help || example.help || String(example.Value ?? example.value), example.Value ?? example.value)));
     if (defaultValue !== null && defaultValue !== undefined && defaultValue !== "" && ![...select.options].some((option) => option.value === String(defaultValue))) {
       select.append(new Option(String(defaultValue), String(defaultValue)));
     }
@@ -844,6 +887,7 @@ function providerField(option, existingValue, secretConfigured = false) {
     field.append(select);
   } else {
     const input = document.createElement("input");
+    input.classList.add("sui-input");
     input.name = `provider_${name}`;
     input.value = defaultValue === null || defaultValue === undefined ? "" : String(defaultValue);
     input.required = required;
@@ -865,7 +909,21 @@ function providerField(option, existingValue, secretConfigured = false) {
       toggle.innerHTML = icon("eye");
       wrapper.append(toggle);
       field.append(wrapper);
-    } else field.append(input);
+    } else {
+      field.append(input);
+      if (examples.length) {
+        const datalist = document.createElement("datalist");
+        datalist.id = `provider-${name}-examples-${++providerDatalistSequence}`;
+        examples.filter((example) => String(example.Value ?? example.value ?? "") !== "").forEach((example) => {
+          const choice = document.createElement("option");
+          choice.value = String(example.Value ?? example.value);
+          choice.label = String(example.Help || example.help || choice.value).split("\n")[0];
+          datalist.append(choice);
+        });
+        input.setAttribute("list", datalist.id);
+        field.append(datalist);
+      }
+    }
   }
   if (secretConfigured) {
     const status = document.createElement("small");
@@ -1157,6 +1215,10 @@ window.addEventListener("hashchange", () => {
 });
 $("#planForm").addEventListener("submit", savePlan);
 $("#remoteForm").addEventListener("submit", saveRemote);
+$("#remoteForm").addEventListener("change", (event) => {
+  if (event.target.name !== "provider_provider") return;
+  renderProviderFields(currentProviderValues());
+});
 $("#notificationForm").addEventListener("submit", saveNotifications);
 $("#providerSelect").addEventListener("change", selectProvider);
 $("#planForm").elements.archive_kind.addEventListener("change", updateArchiveHint);
