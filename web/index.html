@@ -5,10 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>{{SITE_NAME}}</title>
-  <link rel="stylesheet" href="/app.css?v={{ASSET_VERSION}}-2">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/sashimi.css?v={{ASSET_VERSION}}-1">
+  <link rel="stylesheet" href="/app.css?v={{ASSET_VERSION}}-3">
 </head>
 <body>
   <a class="skip-link" href="#main" data-i18n="skip">跳到主要内容</a>
+  <!-- Local Lucide SVG subset. See THIRD_PARTY_NOTICES.md. -->
   <svg class="icon-sprite" aria-hidden="true">
     <symbol id="i-drive" viewBox="0 0 24 24"><path d="M4 15.5 7.5 5h9L20 15.5M4 15.5h16v3.2a1.3 1.3 0 0 1-1.3 1.3H5.3A1.3 1.3 0 0 1 4 18.7v-3.2Zm3.5 0h9M16.5 17.8h.01"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -28,10 +31,16 @@
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
     <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+    <symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+    <symbol id="i-circle-dashed" viewBox="0 0 24 24"><path d="M10.1 2.182a10 10 0 0 1 3.8 0M13.9 21.818a10 10 0 0 1-3.8 0M17.609 3.721a10 10 0 0 1 2.69 2.7M2.182 13.9a10 10 0 0 1 0-3.8M20.279 17.609a10 10 0 0 1-2.7 2.69M21.818 10.1a10 10 0 0 1 0 3.8M3.721 6.391a10 10 0 0 1 2.7-2.69M6.391 20.279a10 10 0 0 1-2.69-2.7"/></symbol>
+    <symbol id="i-circle-check-big" viewBox="0 0 24 24"><path d="M21.801 10A10 10 0 1 1 17 3.335M9 11l3 3L22 4"/></symbol>
+    <symbol id="i-circle-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+    <symbol id="i-timer" viewBox="0 0 24 24"><path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="14" r="8"/></symbol>
   </svg>
 
   <div class="app-shell">
-    <aside class="sidebar" id="primarySidebar" aria-label="Primary">
+    <aside class="sidebar" id="primarySidebar" data-i18n-aria-label="primaryNavigation" aria-label="主导航">
       <div class="brand"><span class="brand-mark"><svg><use href="#i-drive"/></svg></span><span><strong id="siteName" title="{{SITE_NAME}}">{{SITE_NAME}}</strong><small>BACKUP CONTROL</small></span></div>
       <nav>
         <a class="nav-item active" href="/plans" data-page-link="plans"><svg><use href="#i-drive"/></svg><span data-i18n="plans">备份方案</span></a>
@@ -39,7 +48,7 @@
         <a class="nav-item" href="/notifications" data-page-link="notifications"><svg><use href="#i-bell"/></svg><span data-i18n="notifications">通知配置</span></a>
         <a class="nav-item" href="/history" data-page-link="history"><svg><use href="#i-history"/></svg><span data-i18n="history">运行历史</span></a>
       </nav>
-      <div class="sidebar-foot"><span class="status-dot"></span><span data-i18n="serviceOnline">服务在线</span><small id="version">v2.0.6</small></div>
+      <div class="sidebar-foot"><span class="status-dot"></span><span data-i18n="serviceOnline">服务在线</span><small id="version">v2.0.7</small></div>
     </aside>
 
     <div class="workspace">
@@ -47,8 +56,8 @@
         <button class="icon-button mobile-menu" id="menuButton" aria-label="打开菜单" aria-controls="primarySidebar" aria-expanded="false"><svg><use href="#i-menu"/></svg></button>
         <div><p class="eyebrow" data-i18n="workspace">工作空间</p><h1 id="pageHeading" tabindex="-1">备份方案</h1></div>
         <div class="top-actions">
-          <button class="icon-button" id="themeButton" data-tooltip="切换主题" aria-label="切换主题"><svg><use href="#i-sun"/></svg></button>
-          <button class="language-button" id="languageButton" aria-label="Switch language"><svg><use href="#i-globe"/></svg><span>中文</span></button>
+          <button class="icon-button" id="themeButton" data-i18n-tooltip="themeToggle" data-i18n-aria-label="themeToggle" data-tooltip="切换主题" aria-label="切换主题"><svg><use href="#i-sun"/></svg></button>
+          <button class="language-button" id="languageButton" data-i18n-aria-label="switchLanguage" aria-label="切换语言"><svg><use href="#i-globe"/></svg><span>中文</span></button>
           <button class="button primary" id="newPlanButton"><svg><use href="#i-plus"/></svg><span data-i18n="newPlan">新建方案</span></button>
         </div>
       </header>
@@ -65,7 +74,7 @@
             <div class="hero-status"><span class="pulse"></span><span data-i18n="schedulerActive">调度器正在运行</span></div>
           </section>
 
-          <section class="metrics" aria-label="Metrics">
+          <section class="metrics" data-i18n-aria-label="metrics" aria-label="指标">
             <article class="metric"><span data-i18n="activePlans">启用方案</span><strong id="activeCount">—</strong><small data-i18n="automatic">自动调度</small></article>
             <article class="metric"><span data-i18n="last24">近 24 小时</span><strong id="successCount">—</strong><small data-i18n="successRuns">次成功运行</small></article>
             <article class="metric"><span data-i18n="successRate">成功率</span><strong id="successRate">—</strong><small data-i18n="recentRuns">最近运行</small></article>
@@ -97,7 +106,7 @@
             <form id="notificationForm" class="notification-panel">
               <div class="form-error" id="notificationError" role="alert" hidden></div>
               <div class="notification-toolbar"><span id="notificationCount">0 / 32</span><label class="field inline-select"><span class="sr-only" data-i18n="notificationType">通知类型</span><select id="notificationType"><option value="ping">Ping</option><option value="email">Email</option><option value="serverchan-app" data-i18n="serverChanApp">Server酱 App 推送</option><option value="serverchan-wechat" data-i18n="serverChanWechat">Server酱微信推送</option><option value="ntfy">ntfy</option></select></label><button class="button ghost" type="button" data-action="add-notification"><svg><use href="#i-plus"/></svg><span data-i18n="addNotification">添加目标</span></button></div>
-              <ul class="notification-list" id="notificationList" aria-label="通知目标"></ul>
+              <ul class="notification-list" id="notificationList" data-i18n-aria-label="notificationTargets" aria-label="通知目标"></ul>
               <div class="empty-state notification-empty" id="emptyNotifications" hidden><h3 data-i18n="noNotificationTargets">还没有通知目标</h3><p data-i18n="noNotificationTargetsHint">添加 Ping、Email、Server酱或 ntfy；同一类型可以添加多个。</p></div>
               <div class="notification-actions"><p id="notificationSavedAt" aria-live="polite"></p><button class="button primary" id="saveNotificationsButton" type="submit" data-i18n="saveNotifications">保存通知配置</button></div>
             </form>
@@ -118,7 +127,7 @@
 
   <dialog class="plan-dialog" id="planDialog" aria-labelledby="dialogTitle">
     <form id="planForm" method="dialog">
-      <header class="dialog-header"><div><p class="eyebrow" data-i18n="configuration">配置</p><h2 id="dialogTitle">新建方案</h2></div><button class="icon-button" type="button" data-action="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
+      <header class="dialog-header"><div><p class="eyebrow" data-i18n="configuration">配置</p><h2 id="dialogTitle">新建方案</h2></div><button class="icon-button" type="button" data-action="close" data-i18n-aria-label="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
       <div class="dialog-body">
         <div class="form-error" id="formError" role="alert" hidden></div>
         <section class="form-section"><div class="form-section-title"><span>01</span><div><h3 data-i18n="basics">基础设置</h3><p data-i18n="basicsHint">名称、运行状态与定时规则</p></div></div>
@@ -146,6 +155,7 @@
           <div class="repeat-group"><div class="repeat-header"><strong data-i18n="remoteTargets">远端目标</strong><button type="button" class="text-button" data-action="add-remote"><svg><use href="#i-plus"/></svg><span data-i18n="add">添加</span></button></div><div id="remotesEditor"></div></div>
           <div class="form-grid">
             <label class="field"><span data-i18n="remoteCheckConcurrency">连接检查并行数</span><input name="remote_check_concurrency" type="number" min="1" max="32" value="4" required><small data-i18n="remoteCheckConcurrencyHint">同时检查或创建远端目录的最大数量</small></label>
+            <label class="field"><span data-i18n="uploadConcurrency">上传并行数</span><input name="upload_concurrency" type="number" min="1" max="8" value="1" required><small data-i18n="uploadConcurrencyHint">同时上传的远端数量；10 个目标通常建议 2–3</small></label>
             <label class="field"><span data-i18n="rcloneFlags">Rclone 全局参数</span><input name="rclone_flags" placeholder="--transfers 4 --checkers 8"><small data-i18n="flagsHint">使用 shell 风格引号解析，但不会通过 shell 执行</small></label>
           </div>
         </section>
@@ -186,11 +196,11 @@
     </form>
   </dialog>
 
-  <dialog class="log-dialog" id="logDialog" aria-labelledby="runLogTitle"><header class="dialog-header"><div><p class="eyebrow" data-i18n="runProgress">运行进度</p><h2 id="runLogTitle" data-i18n="runLog">运行日志</h2></div><button class="icon-button" type="button" data-action="close-log" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header><section class="run-overview" id="runOverview"></section><details class="raw-log"><summary data-i18n="technicalLog">技术日志</summary><pre id="logContent" tabindex="0"></pre></details></dialog>
+  <dialog class="log-dialog" id="logDialog" aria-labelledby="runLogTitle"><header class="dialog-header"><div><p class="eyebrow" data-i18n="runProgress">运行进度</p><h2 id="runLogTitle" data-i18n="runLog">运行日志</h2></div><button class="icon-button" type="button" data-action="close-log" data-i18n-aria-label="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header><section class="run-overview" id="runOverview"></section><details class="raw-log"><summary data-i18n="technicalLog">技术日志</summary><pre id="logContent" tabindex="0"></pre></details></dialog>
 
   <dialog class="remote-dialog" id="remoteDialog" aria-labelledby="remoteDialogTitle">
     <form id="remoteForm">
-      <header class="dialog-header"><div><p class="eyebrow">RCLONE REMOTE</p><h2 id="remoteDialogTitle" data-i18n="configureStorage">配置存储</h2></div><button class="icon-button" type="button" data-action="close-remote" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
+      <header class="dialog-header"><div><p class="eyebrow">RCLONE REMOTE</p><h2 id="remoteDialogTitle" data-i18n="configureStorage">配置存储</h2></div><button class="icon-button" type="button" data-action="close-remote" data-i18n-aria-label="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
       <div class="dialog-body">
         <p class="wizard-intro" data-i18n="storageIntro">选择存储提供商，输入 rclone 别名和该服务要求的凭据。敏感字段直接交给 rclone 加密保存。</p>
         <div class="form-error" id="remoteError" role="alert" hidden></div>
@@ -212,8 +222,8 @@
     </form>
   </dialog>
 
-  <template id="sourceTemplate"><div class="repeat-row source-row"><label class="field"><span data-i18n="label">名称</span><input data-field="name" required maxlength="80" placeholder="data"></label><label class="field grow"><span data-i18n="path">绝对路径</span><input data-field="path" required placeholder="/data"></label><button type="button" class="icon-button danger" data-action="remove-row" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
-  <template id="remoteTemplate"><div class="repeat-row remote-row"><label class="field"><span data-i18n="remoteName">Rclone 远端名</span><select data-field="name" required><option value="">—</option></select></label><label class="field grow"><span data-i18n="remoteDir">远端目录</span><input data-field="directory" required placeholder="/RcloneBackup/"></label><button type="button" class="icon-button danger" data-action="remove-row" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
-  <script src="/app.js?v={{ASSET_VERSION}}-2" defer></script>
+  <template id="sourceTemplate"><div class="repeat-row source-row"><label class="field"><span data-i18n="label">名称</span><input data-field="name" required maxlength="80" placeholder="data"></label><label class="field grow"><span data-i18n="path">绝对路径</span><input data-field="path" required placeholder="/data"></label><button type="button" class="icon-button danger" data-action="remove-row" data-i18n-aria-label="remove" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
+  <template id="remoteTemplate"><div class="repeat-row remote-row"><label class="field"><span data-i18n="remoteName">Rclone 远端名</span><select data-field="name" required><option value="">—</option></select></label><label class="field grow"><span data-i18n="remoteDir">远端目录</span><input data-field="directory" required placeholder="/RcloneBackup/"></label><button type="button" class="icon-button danger" data-action="remove-row" data-i18n-aria-label="remove" aria-label="删除"><svg><use href="#i-trash"/></svg></button></div></template>
+  <script src="/app.js?v={{ASSET_VERSION}}-3" defer></script>
 </body>
 </html>

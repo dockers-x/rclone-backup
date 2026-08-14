@@ -39,3 +39,12 @@
    and clock-aligned second/minute/hour intervals.
 3. Prove generated schedules in Rust tests and browser-test both editable modes,
    bilingual copy, and narrow layouts before updating the release commit.
+
+## Bounded multi-destination upload follow-up
+
+1. Add a backward-compatible `upload_concurrency` plan field with a conservative
+   default and validated range.
+2. Replace the serial destination loop with a bounded queue that checkpoints
+   pending, active, and completed states without changing archive preparation.
+3. Expose the setting in the bilingual plan form and repeat the complete Rust,
+   frontend, accessibility, and responsive release gates.

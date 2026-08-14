@@ -1,4 +1,4 @@
-use anyhow::{Context, bail};
+use anyhow::{Context, anyhow, bail};
 use rand::{Rng, distr::Alphanumeric};
 use reqwest::Client;
 use serde_json::{Value, json};
@@ -11,9 +11,90 @@ use std::{
 };
 use tokio::{
     process::{Child, Command},
-    sync::Mutex,
-    time::sleep,
+    sync::{Mutex, RwLock},
+    time::{Instant, sleep, timeout, timeout_at},
 };
+
+#[derive(Debug)]
+struct CommandTimeout {
+    command: String,
+    duration: Duration,
+    cancellation_error: Option<String>,
+}
+
+impl std::fmt::Display for CommandTimeout {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "rclone {} timed out after {} seconds",
+            self.command,
+            self.duration.as_secs()
+        )?;
+        if let Some(error) = &self.cancellation_error {
+            write!(formatter, "; cancellation could not be confirmed: {error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for CommandTimeout {}
+
+#[derive(Debug)]
+struct CommandStateUncertain {
+    command: String,
+    control_error: String,
+    cancellation_error: String,
+}
+
+impl std::fmt::Display for CommandStateUncertain {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "rclone {} job state is uncertain after control request error: {}; cancellation could not be confirmed: {}",
+            self.command, self.control_error, self.cancellation_error
+        )
+    }
+}
+
+impl std::error::Error for CommandStateUncertain {}
+
+enum WaitFailure {
+    Terminal(anyhow::Error),
+    Monitor(anyhow::Error),
+}
+
+pub fn command_timed_out(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<CommandTimeout>().is_some()
+}
+
+pub fn command_cancellation_unconfirmed(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<CommandTimeout>()
+        .is_some_and(|error| error.cancellation_error.is_some())
+        || error.downcast_ref::<CommandStateUncertain>().is_some()
+}
+
+fn command_timeout_error(
+    command: &str,
+    duration: Duration,
+    cancellation_error: Option<String>,
+) -> anyhow::Error {
+    CommandTimeout {
+        command: command.to_owned(),
+        duration,
+        cancellation_error,
+    }
+    .into()
+}
+
+fn command_submission_uncertain(command: &str, error: anyhow::Error) -> anyhow::Error {
+    CommandStateUncertain {
+        command: command.to_owned(),
+        control_error: format!("submit command: {error:#}"),
+        cancellation_error: "job submission did not return a job id".into(),
+    }
+    .into()
+}
 
 #[derive(Clone)]
 pub struct RcloneRc {
@@ -24,6 +105,8 @@ pub struct RcloneRc {
     config_path: String,
     version: String,
     ready: Arc<AtomicBool>,
+    quarantined: Arc<AtomicBool>,
+    command_admission: Arc<RwLock<()>>,
     _child: Arc<Mutex<Child>>,
 }
 
@@ -58,6 +141,8 @@ impl RcloneRc {
             config_path: config_path.to_owned(),
             version: String::new(),
             ready: Arc::new(AtomicBool::new(false)),
+            quarantined: Arc::new(AtomicBool::new(false)),
+            command_admission: Arc::new(RwLock::new(())),
             _child: Arc::new(Mutex::new(child)),
         };
         for _ in 0..50 {
@@ -74,6 +159,15 @@ impl RcloneRc {
         self.ready.load(Ordering::Relaxed)
     }
 
+    pub fn is_quarantined(&self) -> bool {
+        self.quarantined.load(Ordering::Acquire)
+    }
+
+    pub async fn quarantine(&self) {
+        let _admission = self.command_admission.write().await;
+        self.quarantined.store(true, Ordering::Release);
+    }
+
     pub async fn refresh_ready(&self) -> bool {
         let ready = self
             .call("config/dump", json!({}))
@@ -88,9 +182,107 @@ impl RcloneRc {
     pub async fn run_command(
         &self,
         command: &str,
-        mut args: Vec<String>,
+        args: Vec<String>,
         options: Vec<String>,
     ) -> anyhow::Result<Value> {
+        let jobid = match self.start_command(command, args, options).await {
+            Ok(jobid) => jobid,
+            Err(error) => {
+                self.quarantine().await;
+                return Err(command_submission_uncertain(command, error));
+            }
+        };
+        match self.wait_for_job(jobid).await {
+            Ok(status) => Ok(status),
+            Err(WaitFailure::Terminal(error)) => Err(error),
+            Err(WaitFailure::Monitor(error)) => self.monitor_failure(command, jobid, error).await,
+        }
+    }
+
+    pub async fn run_command_with_timeout(
+        &self,
+        command: &str,
+        args: Vec<String>,
+        options: Vec<String>,
+        duration: Duration,
+    ) -> anyhow::Result<Value> {
+        let deadline = Instant::now() + duration;
+        let jobid = match timeout_at(deadline, self.start_command(command, args, options)).await {
+            Ok(Ok(jobid)) => jobid,
+            Ok(Err(error)) => {
+                self.quarantine().await;
+                return Err(command_submission_uncertain(command, error));
+            }
+            Err(_) => {
+                self.quarantine().await;
+                return Err(command_timeout_error(
+                    command,
+                    duration,
+                    Some("job submission did not return a job id".into()),
+                ));
+            }
+        };
+        match timeout_at(deadline, self.wait_for_job(jobid)).await {
+            Ok(Ok(status)) => Ok(status),
+            Ok(Err(WaitFailure::Terminal(error))) => Err(error),
+            Ok(Err(WaitFailure::Monitor(error))) => {
+                self.monitor_failure(command, jobid, error).await
+            }
+            Err(_) => {
+                let cancellation_error = self.cancel_job(jobid).await;
+                if cancellation_error.is_some() {
+                    self.quarantine().await;
+                }
+                Err(command_timeout_error(command, duration, cancellation_error))
+            }
+        }
+    }
+
+    async fn monitor_failure(
+        &self,
+        command: &str,
+        jobid: u64,
+        monitor_error: anyhow::Error,
+    ) -> anyhow::Result<Value> {
+        match self.cancel_job(jobid).await {
+            None => Err(monitor_error.context(format!(
+                "monitor rclone {command} job; cancellation confirmed"
+            ))),
+            Some(cancellation_error) => {
+                self.quarantine().await;
+                Err(CommandStateUncertain {
+                    command: command.to_owned(),
+                    control_error: format!("monitor job: {monitor_error:#}"),
+                    cancellation_error,
+                }
+                .into())
+            }
+        }
+    }
+
+    async fn cancel_job(&self, jobid: u64) -> Option<String> {
+        match timeout(
+            Duration::from_secs(2),
+            self.call("job/stop", json!({ "jobid": jobid })),
+        )
+        .await
+        {
+            Ok(Ok(_)) => None,
+            Ok(Err(error)) => Some(format!("{error:#}")),
+            Err(_) => Some("job/stop did not respond within 2 seconds".into()),
+        }
+    }
+
+    async fn start_command(
+        &self,
+        command: &str,
+        mut args: Vec<String>,
+        options: Vec<String>,
+    ) -> anyhow::Result<u64> {
+        let _admission = self.command_admission.read().await;
+        if self.is_quarantined() {
+            bail!("rclone RC is quarantined until the service restarts");
+        }
         args.extend(options);
         args.extend(["--config".into(), self.config_path.clone()]);
         let started = self
@@ -106,8 +298,15 @@ impl RcloneRc {
             .get("jobid")
             .and_then(Value::as_u64)
             .context("RC response has no jobid")?;
+        Ok(jobid)
+    }
+
+    async fn wait_for_job(&self, jobid: u64) -> Result<Value, WaitFailure> {
         loop {
-            let status = self.call("job/status", json!({ "jobid": jobid })).await?;
+            let status = self
+                .call("job/status", json!({ "jobid": jobid }))
+                .await
+                .map_err(WaitFailure::Monitor)?;
             if status
                 .get("finished")
                 .and_then(Value::as_bool)
@@ -118,16 +317,16 @@ impl RcloneRc {
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
                 {
-                    bail!(
+                    return Err(WaitFailure::Terminal(anyhow!(
                         "{}",
                         status
                             .get("error")
                             .and_then(Value::as_str)
                             .unwrap_or("rclone job failed")
-                    );
+                    )));
                 }
                 if let Some(error) = command_output_error(&status) {
-                    bail!("{error}");
+                    return Err(WaitFailure::Terminal(anyhow!(error.to_owned())));
                 }
                 return Ok(status);
             }
@@ -421,9 +620,12 @@ fn parameter_has_value(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_output_error, provider_secret_fields, public_remote_parameters, rclone_version,
+        CommandStateUncertain, command_cancellation_unconfirmed, command_output_error,
+        command_submission_uncertain, command_timed_out, command_timeout_error,
+        provider_secret_fields, public_remote_parameters, rclone_version,
     };
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn reads_version_from_core_version_response() {
@@ -521,6 +723,62 @@ mod tests {
                 "output": { "error": false, "result": "ok" }
             })),
             None
+        );
+    }
+
+    #[test]
+    fn command_timeout_errors_remain_distinguishable_from_remote_failures() {
+        let error = command_timeout_error("lsd", Duration::from_secs(25), None);
+
+        assert!(command_timed_out(&error));
+        assert!(!command_cancellation_unconfirmed(&error));
+        assert_eq!(error.to_string(), "rclone lsd timed out after 25 seconds");
+        assert!(!command_timed_out(&anyhow::anyhow!(
+            "remote rejected credentials"
+        )));
+    }
+
+    #[test]
+    fn command_timeout_reports_unconfirmed_cancellation() {
+        let error = command_timeout_error(
+            "mkdir",
+            Duration::from_secs(25),
+            Some("job/stop did not respond".into()),
+        );
+
+        assert!(command_timed_out(&error));
+        assert!(command_cancellation_unconfirmed(&error));
+        assert!(
+            error
+                .to_string()
+                .contains("cancellation could not be confirmed")
+        );
+    }
+
+    #[test]
+    fn monitor_failures_with_unconfirmed_cancellation_are_distinguishable() {
+        let error: anyhow::Error = CommandStateUncertain {
+            command: "copy".into(),
+            control_error: "monitor job: connection reset".into(),
+            cancellation_error: "job/stop returned 500".into(),
+        }
+        .into();
+
+        assert!(command_cancellation_unconfirmed(&error));
+        assert!(!command_timed_out(&error));
+        assert!(error.to_string().contains("job state is uncertain"));
+    }
+
+    #[test]
+    fn submission_failures_without_a_job_id_are_marked_uncertain() {
+        let error =
+            command_submission_uncertain("copy", anyhow::anyhow!("RC response has no jobid"));
+
+        assert!(command_cancellation_unconfirmed(&error));
+        assert!(
+            error
+                .to_string()
+                .contains("job submission did not return a job id")
         );
     }
 }

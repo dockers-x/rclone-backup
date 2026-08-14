@@ -467,6 +467,7 @@ mod tests {
                 notifications: Default::default(),
                 rclone_flags: vec![],
                 remote_check_concurrency: rclone_backup_core::DEFAULT_REMOTE_CHECK_CONCURRENCY,
+                upload_concurrency: rclone_backup_core::DEFAULT_UPLOAD_CONCURRENCY,
             };
             plans.push(input.into_plan(Uuid::new_v4(), now));
         }

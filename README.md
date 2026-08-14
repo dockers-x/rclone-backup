@@ -26,7 +26,7 @@ docker run -d \
   -p 127.0.0.1:8080:8080 \
   -v rclone-backup-data:/config \
   -v /path/to/backup:/data:ro \
-  czyt/rclone-backup:2.0.6
+  czyt/rclone-backup:2.0.7
 ```
 
 Open `http://127.0.0.1:8080`. On a fresh installation the service displays the storage wizard and remains running. Scheduled and manual backups stay locked until at least one working rclone alias exists.
@@ -55,6 +55,8 @@ rclone copy MyAlias:/RcloneBackup/backup-20260813 ./restore
 ## Storage accounts
 
 The Web UI gets provider options from the bundled rclone API and writes credentials directly to rclone's configuration file. The application database stores only remote aliases referenced by plans. The remote editor returns non-secret configuration values and credential identifiers such as usernames or access-key IDs; passwords, secret keys, and tokens are never returned, only their configured state.
+
+Each plan has separate limits for destination checks and uploads. Destination checks default to 4 concurrent jobs (range 1–32); uploads default to serial execution and can be set from 1–8. For roughly ten destinations, start with 2–3 uploads and tune from observed disk, memory, and network usage. Native rclone tuning such as `--transfers`, `--checkers`, `--buffer-size`, and retry flags remains available through the plan's global rclone flags field.
 
 The private rclone RC service listens only on `127.0.0.1:5572`, uses random per-process credentials, and is not exposed by the public API. The Web server invokes allow-listed rclone operations through this private API.
 
@@ -110,7 +112,7 @@ Multiple complete plans can be seeded once with `RCLONE_BACKUP_PLANS` as a JSON 
 | `RCLONE_BACKUP_SITE_NAME` | `Rclone Backup` | Browser title and site name shown in the Web UI |
 | `RCLONE_BACKUP_ADDR` | `0.0.0.0:8080` | Public Web listener |
 | `RCLONE_BACKUP_DATABASE_URL` | `sqlite:///config/rclone-backup.db?mode=rwc` | Application SQLite |
-| `RCLONE_BACKUP_WORK_DIR` | `/tmp/rclone-backup` | Temporary workspace; must be outside every source directory |
+| `RCLONE_BACKUP_WORK_DIR` | `/tmp/rclone-backup` | Temporary workspace root; managed runs use a private `.runs` subdirectory and the root must be outside every source directory |
 | `RCLONE_CONFIG` | `/config/rclone/rclone.conf` | rclone account configuration |
 | `RCLONE_BACKUP_KEY_FILE` | `/config/.rclone-backup.key` | Plan-encryption key path |
 | `RCLONE_BACKUP_SECRET_KEY[_FILE]` | unset | Explicit 32-byte unpadded-base64 plan key |
@@ -127,7 +129,7 @@ Requires stable Rust. Runtime backup execution also needs `rclone`, `7z`, `cp`, 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo test --workspace --all-targets --all-features
 cargo run -- serve
 ```
 

@@ -39,7 +39,9 @@ pub fn router(state: AppState) -> Router {
         .iter()
         .fold(Router::new(), |router, path| router.route(path, get(index)))
         .route("/app.css", get(css))
+        .route("/sashimi.css", get(sashimi_css))
         .route("/app.js", get(js))
+        .route("/favicon.svg", get(favicon))
         .route("/api/docs", get(api_docs))
         .route("/api/openapi.json", get(openapi))
         .route("/api/status", get(status))
@@ -106,11 +108,20 @@ async fn css() -> impl IntoResponse {
         "text/css; charset=utf-8",
     )
 }
+async fn sashimi_css() -> impl IntoResponse {
+    static_asset(
+        include_str!("../../../web/sashimi.css"),
+        "text/css; charset=utf-8",
+    )
+}
 async fn js() -> impl IntoResponse {
     static_asset(
         include_str!("../../../web/app.js"),
         "text/javascript; charset=utf-8",
     )
+}
+async fn favicon() -> impl IntoResponse {
+    static_asset(include_str!("../../../web/favicon.svg"), "image/svg+xml")
 }
 fn static_asset(content: &'static str, content_type: &'static str) -> Response {
     Response::builder()
@@ -164,6 +175,7 @@ mod asset_tests {
 struct Status {
     service: &'static str,
     rclone_ready: bool,
+    rclone_quarantined: bool,
     authentication_enabled: bool,
     rclone_stats: serde_json::Value,
 }
@@ -171,6 +183,7 @@ async fn status(State(state): State<AppState>) -> Json<Status> {
     Json(Status {
         service: "online",
         rclone_ready: state.runner.rclone_ready(),
+        rclone_quarantined: state.runner.rclone_quarantined(),
         authentication_enabled: state.public_auth.is_some(),
         rclone_stats: state.runner.rclone_stats().await,
     })
@@ -898,8 +911,12 @@ mod tests {
         let html = super::render_index_html("Backup");
         let version = env!("CARGO_PKG_VERSION");
 
-        assert!(html.contains(&format!("/app.css?v={version}-2")));
-        assert!(html.contains(&format!("/app.js?v={version}-2")));
+        assert!(html.contains(&format!("/sashimi.css?v={version}-1")));
+        assert!(html.contains(&format!("/app.css?v={version}-3")));
+        assert!(html.contains(&format!("/app.js?v={version}-3")));
+        assert!(html.contains("href=\"/favicon.svg\""));
+        assert!(!html.contains("cdn.jsdelivr.net"));
+        assert!(include_str!("../../../web/sashimi.css").contains(".sui-progress"));
         assert!(!html.contains("{{ASSET_VERSION}}"));
     }
 

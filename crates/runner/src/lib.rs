@@ -1,7 +1,7 @@
 use anyhow::{Context, anyhow, bail};
 use chrono::Local;
 use rclone_backup_core::*;
-use rclone_backup_rclone::RcloneRc;
+use rclone_backup_rclone::{RcloneRc, command_cancellation_unconfirmed, command_timed_out};
 use rclone_backup_store::Store;
 use std::{
     collections::{HashMap, HashSet},
@@ -13,13 +13,31 @@ use tokio::{
     fs,
     io::AsyncWriteExt,
     process::Command,
-    sync::{Mutex, Semaphore},
+    sync::Mutex,
+    task::JoinSet,
     time::{Duration, sleep},
 };
 use tracing::warn;
 use uuid::Uuid;
 
 const MAX_LOG_BYTES: usize = 512 * 1024;
+const REMOTE_CHECK_TIMEOUT: Duration = Duration::from_secs(25);
+const MANAGED_WORKSPACE_DIR: &str = ".runs";
+
+#[derive(Debug)]
+struct RcJobStateUncertain(String);
+
+impl std::fmt::Display for RcJobStateUncertain {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "rclone job state is uncertain: {}", self.0)
+    }
+}
+
+impl std::error::Error for RcJobStateUncertain {}
+
+fn rc_job_state_uncertain(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<RcJobStateUncertain>().is_some()
+}
 
 #[derive(Clone)]
 pub struct Runner {
@@ -39,16 +57,41 @@ impl Runner {
         }
     }
 
+    pub async fn prepare_workspaces(work_dir: impl AsRef<Path>) -> anyhow::Result<()> {
+        let work_dir = work_dir.as_ref();
+        fs::create_dir_all(work_dir)
+            .await
+            .context("create workspace root")?;
+        let managed = work_dir.join(MANAGED_WORKSPACE_DIR);
+        if let Ok(metadata) = fs::symlink_metadata(&managed).await {
+            if metadata.file_type().is_symlink() {
+                bail!("managed workspace directory cannot be a symlink");
+            }
+            fs::remove_dir_all(&managed)
+                .await
+                .context("clear workspaces preserved by the previous daemon")?;
+        }
+        create_private_dir(&managed).await
+    }
+
     pub async fn is_active(&self, id: Uuid) -> bool {
         self.active.lock().await.contains(&id)
     }
 
     pub fn rclone_ready(&self) -> bool {
-        self.rc.is_ready()
+        !self.rclone_quarantined() && self.rc.is_ready()
     }
 
     pub async fn rc_refresh_ready(&self) -> bool {
-        self.rc.refresh_ready().await
+        if self.rclone_quarantined() {
+            false
+        } else {
+            self.rc.refresh_ready().await
+        }
+    }
+
+    pub fn rclone_quarantined(&self) -> bool {
+        self.rc.is_quarantined()
     }
 
     pub async fn rclone_stats(&self) -> serde_json::Value {
@@ -105,19 +148,20 @@ impl Runner {
     }
 
     pub async fn test_rclone_remote(&self, name: &str) -> anyhow::Result<()> {
-        let check = self.rc.run_command(
-            "lsd",
-            vec![format!("{name}:")],
-            vec![
-                "--contimeout=8s".into(),
-                "--timeout=15s".into(),
-                "--retries=1".into(),
-                "--low-level-retries=1".into(),
-            ],
-        );
-        tokio::time::timeout(Duration::from_secs(25), check)
-            .await
-            .map_err(|_| anyhow!("rclone connection test timed out after 25 seconds"))??;
+        self.ensure_rclone_available()?;
+        self.rc
+            .run_command_with_timeout(
+                "lsd",
+                vec![format!("{name}:")],
+                vec![
+                    "--contimeout=8s".into(),
+                    "--timeout=15s".into(),
+                    "--retries=1".into(),
+                    "--low-level-retries=1".into(),
+                ],
+                REMOTE_CHECK_TIMEOUT,
+            )
+            .await?;
         Ok(())
     }
 
@@ -226,6 +270,7 @@ impl Runner {
         trigger: &str,
         max_active: Option<usize>,
     ) -> anyhow::Result<Option<String>> {
+        self.ensure_rclone_available()?;
         if !self.rc.is_ready() {
             bail!("RCLONE_NOT_READY: configure at least one rclone remote first");
         }
@@ -256,6 +301,7 @@ impl Runner {
     }
 
     pub async fn execute_sync(&self, plan: Plan, trigger: &str) -> anyhow::Result<()> {
+        self.ensure_rclone_available()?;
         if !self.rc.refresh_ready().await {
             bail!("RCLONE_NOT_READY: configure at least one rclone remote first");
         }
@@ -280,6 +326,15 @@ impl Runner {
         let result = self.execute_inner(&plan, &run).await;
         self.active.lock().await.remove(&plan_id);
         result
+    }
+
+    fn ensure_rclone_available(&self) -> anyhow::Result<()> {
+        if self.rclone_quarantined() {
+            bail!(
+                "RCLONE_STATE_UNCERTAIN: a previous rclone job may still be active; restart the service before starting another backup"
+            );
+        }
+        Ok(())
     }
 
     async fn execute_inner(&self, plan: &Plan, run: &RunRecord) -> anyhow::Result<()> {
@@ -307,6 +362,13 @@ impl Runner {
                 .backup_once(plan, &notifications, &run.id, attempt, &mut log)
                 .await;
             if result.is_ok() {
+                break;
+            }
+            if result.as_ref().is_err_and(rc_job_state_uncertain) {
+                self.rc.quarantine().await;
+                log.line(
+                    "Rclone job state could not be confirmed. The workspace was preserved and new backups are blocked until the service restarts.",
+                );
                 break;
             }
             if attempt < plan.retry.max_attempts {
@@ -355,15 +417,24 @@ impl Runner {
         attempt: u32,
         log: &mut LogBuffer,
     ) -> anyhow::Result<()> {
-        let run_dir = self
-            .work_dir
-            .join(format!("{}-{}", safe_name(&plan.name), Uuid::new_v4()));
-        fs::create_dir_all(&run_dir)
+        let run_dir = self.work_dir.join(MANAGED_WORKSPACE_DIR).join(format!(
+            "{}-{}",
+            safe_name(&plan.name),
+            Uuid::new_v4()
+        ));
+        create_private_dir(&run_dir)
             .await
             .context("create working directory")?;
         let result = self
             .backup_in_dir(plan, notifications, &run_dir, run_id, attempt, log)
             .await;
+        if result.as_ref().is_err_and(rc_job_state_uncertain) {
+            log.line(format!(
+                "Preserved workspace {} because rclone may still be reading it.",
+                run_dir.display()
+            ));
+            return result;
+        }
         if let Err(error) = fs::remove_dir_all(&run_dir).await {
             warn!(%error, "cleanup working directory");
         }
@@ -456,43 +527,93 @@ impl Runner {
                 target
             }
         };
+        if plan.archive.kind != "none"
+            && fs::try_exists(&staging).await.unwrap_or(false)
+            && let Err(error) = fs::remove_dir_all(&staging).await
+        {
+            warn!(%error, "cleanup plaintext archive staging directory");
+        }
         log.phase("uploading");
-        self.checkpoint(run_id, attempt, log).await?;
-        let mut upload_failures = Vec::new();
         for remote in &plan.remotes {
-            let destination = if plan.archive.kind == "none" {
-                format!(
-                    "{}/{archive_base}",
-                    remote_path(remote).trim_end_matches('/')
-                )
-            } else {
-                remote_path(remote)
-            };
-            log.target(remote, "uploading", "");
-            log.line(format!("rclone copy {} {destination}", upload.display()));
-            self.checkpoint(run_id, attempt, log).await?;
-            match self
-                .rc
-                .run_command(
-                    "copy",
-                    vec![upload.to_string_lossy().into_owned(), destination.clone()],
-                    plan.rclone_flags.clone(),
-                )
-                .await
-                .with_context(|| format!("upload to {destination}"))
-            {
-                Ok(_) => {
-                    log.target(remote, "success", "");
+            log.target(remote, "pending", "");
+        }
+        self.checkpoint(run_id, attempt, log).await?;
+        let concurrency = plan.upload_concurrency.clamp(1, MAX_UPLOAD_CONCURRENCY);
+        let upload_context = UploadContext {
+            rc: self.rc.clone(),
+            source: upload.to_string_lossy().into_owned(),
+            archive_kind: plan.archive.kind.clone(),
+            archive_base: archive_base.clone(),
+            flags: plan.rclone_flags.clone(),
+        };
+        let mut pending = plan.remotes.iter().cloned();
+        let mut uploads = JoinSet::new();
+        let mut upload_failures = Vec::new();
+        let mut checkpoint_error = None;
+        let mut uncertain_job = None;
+
+        while uploads.len() < concurrency && !self.rclone_quarantined() {
+            let Some(remote) = pending.next() else { break };
+            start_remote_upload(&mut uploads, remote, upload_context.clone(), log);
+        }
+        remember_first_error(
+            &mut checkpoint_error,
+            self.checkpoint(run_id, attempt, log).await,
+        );
+
+        while let Some(result) = uploads.join_next().await {
+            match result {
+                Ok((remote, destination, Ok(()))) => {
+                    log.target(&remote, "success", "");
                     log.line(format!("Upload to {destination} succeeded."));
                 }
-                Err(error) => {
+                Ok((remote, destination, Err(error))) => {
                     let detail = format!("{error:#}");
-                    log.target(remote, "failed", &detail);
+                    log.target(&remote, "failed", &detail);
                     log.line(format!("Upload to {destination} failed: {detail}"));
-                    upload_failures.push(remote.name.clone());
+                    upload_failures.push(remote.name);
+                    if command_cancellation_unconfirmed(&error) && uncertain_job.is_none() {
+                        self.rc.quarantine().await;
+                        uncertain_job = Some(detail);
+                    }
+                }
+                Err(error) => {
+                    log.line(format!("An upload task stopped unexpectedly: {error}"));
+                    upload_failures.push("unexpected task failure".into());
                 }
             }
-            self.checkpoint(run_id, attempt, log).await?;
+            remember_first_error(
+                &mut checkpoint_error,
+                self.checkpoint(run_id, attempt, log).await,
+            );
+
+            if checkpoint_error.is_none()
+                && uncertain_job.is_none()
+                && !self.rclone_quarantined()
+                && let Some(next) = pending.next()
+            {
+                start_remote_upload(&mut uploads, next, upload_context.clone(), log);
+                remember_first_error(
+                    &mut checkpoint_error,
+                    self.checkpoint(run_id, attempt, log).await,
+                );
+            }
+        }
+        if uncertain_job.is_none() && self.rclone_quarantined() {
+            uncertain_job = Some(
+                "another rclone job entered quarantine while this upload queue was active".into(),
+            );
+        }
+        if let Some(detail) = uncertain_job {
+            let detail = if let Some(error) = checkpoint_error {
+                format!("{detail}; progress persistence also failed: {error:#}")
+            } else {
+                detail
+            };
+            return Err(RcJobStateUncertain(detail).into());
+        }
+        if let Some(error) = checkpoint_error {
+            return Err(error.context("persist upload progress after draining active jobs"));
         }
         if !upload_failures.is_empty() {
             bail!(
@@ -504,7 +625,7 @@ impl Runner {
         }
         log.phase("retention");
         self.checkpoint(run_id, attempt, log).await?;
-        self.apply_retention(plan, log).await;
+        self.apply_retention(plan, log).await?;
         notify(
             plan,
             notifications,
@@ -526,52 +647,87 @@ impl Runner {
         let concurrency = plan
             .remote_check_concurrency
             .clamp(1, MAX_REMOTE_CHECK_CONCURRENCY);
-        let semaphore = Arc::new(Semaphore::new(concurrency));
-        let mut checks = Vec::with_capacity(plan.remotes.len());
-
-        for remote in &plan.remotes {
-            let destination = remote_path(remote);
-            log.target(remote, "checking", "");
-            log.line(format!("rclone lsd {destination}"));
-            let rc = self.rc.clone();
-            let flags = plan.rclone_flags.clone();
-            let permit = semaphore.clone();
-            let handle = tokio::spawn(async move {
-                let _permit = permit.acquire_owned().await.ok();
-                if rc
-                    .run_command("lsd", vec![destination.clone()], flags.clone())
-                    .await
-                    .is_ok()
-                {
-                    return (false, true);
-                }
-                let created = rc
-                    .run_command("mkdir", vec![destination], flags)
-                    .await
-                    .is_ok();
-                (true, created)
-            });
-            checks.push((remote, handle));
-        }
-        self.checkpoint(run_id, attempt, log).await?;
-
+        let mut pending = plan.remotes.iter().cloned();
+        let mut checks = JoinSet::new();
         let mut available = 0;
-        for (remote, check) in checks {
-            let (mkdir_attempted, ready) = check.await.unwrap_or((false, false));
-            if mkdir_attempted {
-                log.line(format!("rclone mkdir {}", remote_path(remote)));
+        let mut checkpoint_error = None;
+        let mut uncertain_job = None;
+
+        while checks.len() < concurrency && !self.rclone_quarantined() {
+            let Some(remote) = pending.next() else { break };
+            start_remote_check(
+                &mut checks,
+                remote,
+                self.rc.clone(),
+                plan.rclone_flags.clone(),
+                log,
+            );
+        }
+        remember_first_error(
+            &mut checkpoint_error,
+            self.checkpoint(run_id, attempt, log).await,
+        );
+
+        while let Some(result) = checks.join_next().await {
+            match result {
+                Ok((remote, mkdir_attempted, ready, detail, cancellation_uncertain)) => {
+                    if mkdir_attempted {
+                        log.line(format!("rclone mkdir {}", remote_path(&remote)));
+                    }
+                    if ready {
+                        available += 1;
+                        log.target(&remote, "ready", &detail);
+                    } else {
+                        log.target(&remote, "unavailable", &detail);
+                        log.line(format!("Destination {} unavailable: {detail}", remote.name));
+                    }
+                    if cancellation_uncertain && uncertain_job.is_none() {
+                        self.rc.quarantine().await;
+                        uncertain_job = Some(detail);
+                    }
+                }
+                Err(error) => log.line(format!(
+                    "A destination check task stopped unexpectedly: {error}"
+                )),
             }
-            if ready {
-                available += 1;
-                log.target(remote, "ready", "");
-            } else {
-                log.target(
-                    remote,
-                    "unavailable",
-                    "connection check and directory creation failed",
+            remember_first_error(
+                &mut checkpoint_error,
+                self.checkpoint(run_id, attempt, log).await,
+            );
+
+            if checkpoint_error.is_none()
+                && uncertain_job.is_none()
+                && !self.rclone_quarantined()
+                && let Some(next) = pending.next()
+            {
+                start_remote_check(
+                    &mut checks,
+                    next,
+                    self.rc.clone(),
+                    plan.rclone_flags.clone(),
+                    log,
+                );
+                remember_first_error(
+                    &mut checkpoint_error,
+                    self.checkpoint(run_id, attempt, log).await,
                 );
             }
-            self.checkpoint(run_id, attempt, log).await?;
+        }
+        if uncertain_job.is_none() && self.rclone_quarantined() {
+            uncertain_job = Some(
+                "another rclone job entered quarantine while destination checks were active".into(),
+            );
+        }
+        if let Some(detail) = uncertain_job {
+            let detail = if let Some(error) = checkpoint_error {
+                format!("{detail}; progress persistence also failed: {error:#}")
+            } else {
+                detail
+            };
+            return Err(RcJobStateUncertain(detail).into());
+        }
+        if let Some(error) = checkpoint_error {
+            return Err(error.context("persist destination checks after draining active jobs"));
         }
         if available == 0 {
             bail!("all rclone destinations are unavailable");
@@ -585,10 +741,16 @@ impl Runner {
             .await
     }
 
-    async fn apply_retention(&self, plan: &Plan, log: &mut LogBuffer) {
+    async fn apply_retention(&self, plan: &Plan, log: &mut LogBuffer) -> anyhow::Result<()> {
         let archive_prefix = archive_prefix(plan);
         let include = format!("/{archive_prefix}*.{}", plan.archive.kind);
         for remote in &plan.remotes {
+            if self.rclone_quarantined() {
+                return Err(RcJobStateUncertain(
+                    "rclone entered quarantine before retention completed".into(),
+                )
+                .into());
+            }
             let destination = remote_path(remote);
             if plan.retention.keep_days > 0 {
                 log.line(format!(
@@ -610,7 +772,8 @@ impl Runner {
                     )
                     .await
                 {
-                    log.line(format!("Age retention warning: {error}"));
+                    self.handle_retention_error("Age retention", error, log)
+                        .await?;
                 }
             }
             if plan.retention.keep_count > 0 {
@@ -644,14 +807,36 @@ impl Runner {
                                 .run_command("deletefile", vec![path], plan.rclone_flags.clone())
                                 .await
                             {
-                                log.line(format!("Count retention warning: {error}"));
+                                self.handle_retention_error("Count retention", error, log)
+                                    .await?;
                             }
                         }
                     }
-                    Err(error) => log.line(format!("Count retention warning: {error}")),
+                    Err(error) => {
+                        self.handle_retention_error("Count retention", error, log)
+                            .await?;
+                    }
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn handle_retention_error(
+        &self,
+        operation: &str,
+        error: anyhow::Error,
+        log: &mut LogBuffer,
+    ) -> anyhow::Result<()> {
+        if command_cancellation_unconfirmed(&error) {
+            self.rc.quarantine().await;
+            return Err(RcJobStateUncertain(format!(
+                "{operation} left an rclone job in an uncertain state: {error:#}"
+            ))
+            .into());
+        }
+        log.line(format!("{operation} warning: {error}"));
+        Ok(())
     }
 
     fn ensure_workspace_outside_sources(&self, plan: &Plan, run_dir: &Path) -> anyhow::Result<()> {
@@ -669,6 +854,16 @@ impl Runner {
         }
         Ok(())
     }
+}
+
+async fn create_private_dir(path: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(path).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).await?;
+    }
+    Ok(())
 }
 
 fn archive_prefix(plan: &Plan) -> String {
@@ -732,6 +927,115 @@ struct RcloneItem {
 
 fn remote_path(remote: &RemoteConfig) -> String {
     format!("{}:{}", remote.name, remote.directory.trim_end_matches('/'))
+}
+
+fn start_remote_check(
+    checks: &mut JoinSet<(RemoteConfig, bool, bool, String, bool)>,
+    remote: RemoteConfig,
+    rc: RcloneRc,
+    mut flags: Vec<String>,
+    log: &mut LogBuffer,
+) {
+    let destination = remote_path(&remote);
+    log.target(&remote, "checking", "");
+    log.line(format!("rclone lsd {destination}"));
+    flags.extend([
+        "--contimeout=8s".into(),
+        "--timeout=15s".into(),
+        "--retries=1".into(),
+        "--low-level-retries=1".into(),
+    ]);
+    checks.spawn(async move {
+        let check = rc
+            .run_command_with_timeout(
+                "lsd",
+                vec![destination.clone()],
+                flags.clone(),
+                REMOTE_CHECK_TIMEOUT,
+            )
+            .await;
+        match check {
+            Ok(_) => (remote, false, true, String::new(), false),
+            Err(error) if command_timed_out(&error) => {
+                let cancellation_uncertain = command_cancellation_unconfirmed(&error);
+                (remote, false, false, error.to_string(), cancellation_uncertain)
+            }
+            Err(error) if command_cancellation_unconfirmed(&error) => {
+                (remote, false, false, format!("{error:#}"), true)
+            }
+            Err(check_error) => {
+                let create = rc
+                    .run_command_with_timeout(
+                        "mkdir",
+                        vec![destination],
+                        flags,
+                        REMOTE_CHECK_TIMEOUT,
+                    )
+                    .await;
+                match create {
+                    Ok(_) => (remote, true, true, "directory created".into(), false),
+                    Err(create_error) => (
+                        remote,
+                        true,
+                        false,
+                        format!(
+                            "connection check failed: {check_error:#}; directory creation failed: {create_error:#}"
+                        ),
+                        command_cancellation_unconfirmed(&create_error),
+                    ),
+                }
+            }
+        }
+    });
+}
+
+fn remember_first_error(slot: &mut Option<anyhow::Error>, result: anyhow::Result<()>) {
+    if slot.is_none()
+        && let Err(error) = result
+    {
+        *slot = Some(error);
+    }
+}
+
+#[derive(Clone)]
+struct UploadContext {
+    rc: RcloneRc,
+    source: String,
+    archive_kind: String,
+    archive_base: String,
+    flags: Vec<String>,
+}
+
+fn start_remote_upload(
+    uploads: &mut JoinSet<(RemoteConfig, String, anyhow::Result<()>)>,
+    remote: RemoteConfig,
+    context: UploadContext,
+    log: &mut LogBuffer,
+) {
+    let destination = if context.archive_kind == "none" {
+        format!(
+            "{}/{}",
+            remote_path(&remote).trim_end_matches('/'),
+            context.archive_base,
+        )
+    } else {
+        remote_path(&remote)
+    };
+    log.target(&remote, "uploading", "");
+    log.line(format!("rclone copy {} {destination}", context.source));
+    uploads.spawn(async move {
+        let result = context
+            .rc
+            .run_command(
+                "copy",
+                vec![context.source, destination.clone()],
+                context.flags,
+            )
+            .await
+            .map(|_| ())
+            .with_context(|| format!("upload to {destination}"));
+        (remote, destination, result)
+    });
 }
 
 #[derive(Clone)]
@@ -982,6 +1286,7 @@ impl LogBuffer {
             notifications: NotificationConfig::default(),
             rclone_flags: Vec::new(),
             remote_check_concurrency: DEFAULT_REMOTE_CHECK_CONCURRENCY,
+            upload_concurrency: DEFAULT_UPLOAD_CONCURRENCY,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -1009,7 +1314,11 @@ impl LogBuffer {
     }
 
     fn phase(&mut self, phase: &str) {
-        self.event(serde_json::json!({ "kind": "phase", "phase": phase }));
+        self.event(serde_json::json!({
+            "kind": "phase",
+            "phase": phase,
+            "at": chrono::Utc::now().to_rfc3339(),
+        }));
         for target in self.targets.values().cloned().collect::<Vec<_>>() {
             self.event(target);
         }
@@ -1022,6 +1331,7 @@ impl LogBuffer {
             "directory": remote.directory,
             "status": status,
             "detail": detail,
+            "at": chrono::Utc::now().to_rfc3339(),
         });
         self.targets.insert(
             format!("{}\0{}", remote.name, remote.directory),
@@ -1042,6 +1352,51 @@ mod tests {
     fn names_and_secrets_are_safe() {
         assert_eq!(safe_name("My Files / 1"), "my-files---1");
         assert_eq!(redact("token=secret", &["secret".into()]), "token=••••••••");
+    }
+
+    #[tokio::test]
+    async fn managed_workspaces_are_private_and_stale_runs_are_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let work_dir = directory.path().join("work");
+        let stale = work_dir.join(MANAGED_WORKSPACE_DIR).join("stale");
+        fs::create_dir_all(&stale).await.unwrap();
+        fs::write(stale.join("plaintext"), b"secret").await.unwrap();
+
+        Runner::prepare_workspaces(&work_dir).await.unwrap();
+
+        assert!(!stale.exists());
+        let managed = work_dir.join(MANAGED_WORKSPACE_DIR);
+        assert!(managed.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&managed).await.unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn managed_workspace_cleanup_rejects_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let work_dir = directory.path().join("work");
+        let outside = directory.path().join("outside");
+        fs::create_dir_all(&work_dir).await.unwrap();
+        fs::create_dir_all(&outside).await.unwrap();
+        symlink(&outside, work_dir.join(MANAGED_WORKSPACE_DIR)).unwrap();
+
+        assert!(
+            Runner::prepare_workspaces(&work_dir)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("cannot be a symlink")
+        );
+        assert!(outside.is_dir());
     }
 
     #[test]
@@ -1069,6 +1424,10 @@ mod tests {
         let event: serde_json::Value = serde_json::from_str(event).unwrap();
         assert_eq!(event["kind"], "target");
         assert_eq!(event["name"], remote.name);
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(event["at"].as_str().unwrap()).is_ok(),
+            "progress events need a machine-readable timestamp for truthful elapsed time"
+        );
         assert!(!log.text.contains("secret"));
         assert!(log.text.contains(REDACTED));
     }

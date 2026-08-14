@@ -16,7 +16,7 @@ const translations = {
     enabledHint: "保存后调度器将按当前定时规则运行", scheduleFrequency: "运行频率", daily: "每天", weekly: "每周", monthly: "每月", everyHours: "每隔几小时", everyMinutes: "每隔几分钟", everySeconds: "每隔几秒", runAt: "运行时间", weekday: "星期", monthday: "每月日期", monthdayHint: "没有该日期的月份会跳过", interval: "间隔", hoursUnit: "小时", minutesUnit: "分钟", secondsUnit: "秒", monday: "星期一", tuesday: "星期二", wednesday: "星期三", thursday: "星期四", friday: "星期五", saturday: "星期六", sunday: "星期日", schedulePreview: "{summary}",
     sourcesTargets: "数据源与目标",
     sourcesTargetsHint: "支持多个文件夹和 rclone 远端", folders: "备份文件夹", add: "添加",
-    remoteTargets: "远端目标", remoteCheckConcurrency: "连接检查并行数", remoteCheckConcurrencyHint: "同时检查或创建远端目录的最大数量", rcloneFlags: "Rclone 全局参数", flagsHint: "使用 shell 风格引号解析，但不会通过 shell 执行",
+    remoteTargets: "远端目标", remoteCheckConcurrency: "连接检查并行数", remoteCheckConcurrencyHint: "同时检查或创建远端目录的最大数量", uploadConcurrency: "上传并行数", uploadConcurrencyHint: "同时上传的远端数量；10 个目标通常建议 2–3", rcloneFlags: "Rclone 全局参数", flagsHint: "使用 shell 风格引号解析，但不会通过 shell 执行",
     none: "不备份", archiveEncryption: "归档与加密", archiveEncryptionHint: "生成可直接下载和解压恢复的标准归档", backupRetentionPolicy: "备份保留策略", backupRetentionHint: "按时间或数量自动清理旧备份，可独立启用",
     archiveType: "归档格式", archivePassword: "归档密码（可选）", fileSuffix: "文件名时间格式",
     secureArchive: "7z · 安全优先（推荐）", compatibleArchive: "ZIP · 兼容优先", nativeDirectory: "原生目录 · 依赖 rclone 恢复",
@@ -26,13 +26,13 @@ const translations = {
     exponential: "指数退避", fixed: "固定间隔", initialDelay: "初始等待（秒）", maxDelay: "最长等待（秒）",
     notifications: "通知", notificationsHint: "Ping、Email、Server酱与 ntfy", smtpHint: "在成功或失败时发送邮件",
     recipient: "收件人", smtpHost: "SMTP 主机", smtpPort: "端口", smtpSecurity: "连接安全", smtpStarttls: "STARTTLS（推荐）", smtpTls: "TLS", smtpFrom: "发件人", smtpUsername: "用户名", smtpPassword: "密码", smtpPasswordHint: "密码已保存时会显示掩码，保持不变即可继续使用。", serverChanHint: "通过 SendKey 推送运行状态",
-    cancel: "取消", savePlan: "保存方案", runLog: "运行日志", runProgress: "运行进度", technicalLog: "技术日志", label: "名称", path: "绝对路径",
+    cancel: "取消", close: "关闭", remove: "删除", themeToggle: "切换主题", switchLanguage: "切换语言", menuOpen: "打开菜单", menuClose: "关闭菜单", primaryNavigation: "主导航", metrics: "指标", savePlan: "保存方案", runLog: "运行日志", runProgress: "运行进度", technicalLog: "技术日志", label: "名称", path: "绝对路径",
     remoteName: "Rclone 远端名", remoteDir: "远端目录", edit: "编辑", runNow: "立即运行", delete: "删除",
     source: "数据源", target: "目标", retry: "重试", attempts: "次", enabledBadge: "已启用", disabledBadge: "已停用",
     manual: "手动", scheduleTrigger: "定时", cli: "命令行", noRuns: "暂无运行记录", viewLog: "查看日志",
     saveSuccess: "方案已保存", deleteConfirm: "确定删除这个方案吗？运行历史会保留。", deleteSuccess: "方案已删除",
     runQueued: "备份任务已加入队列", loadError: "加载失败", formInvalid: "请检查表单中的必填字段。",
-    rcloneWaiting: "等待配置存储", rcloneWaitingHint: "服务会保持运行，但在检测到至少一个 rclone 远端前不会启动任何备份任务。",
+    rcloneWaiting: "等待配置存储", rcloneWaitingHint: "服务会保持运行，但在检测到至少一个 rclone 远端前不会启动任何备份任务。", rcloneQuarantined: "rclone 状态需要恢复", rcloneQuarantinedHint: "上一个任务的停止状态无法确认。为保护备份源和并发边界，新任务已暂停；请重启服务后再运行。", restartRequired: "需要重启服务",
     configureStorage: "配置存储", storageIntro: "选择存储提供商，输入 rclone 别名和该服务要求的凭据。敏感字段直接交给 rclone 加密保存。",
     rcloneAlias: "Rclone 别名", provider: "存储提供商", loadingProviders: "正在加载提供商…",
     advancedOptions: "高级选项", saveAndTest: "保存并测试", savingAndTesting: "正在保存并测试…", providerRequired: "请选择存储提供商。",
@@ -42,6 +42,7 @@ const translations = {
     storageAccounts: "存储账号", addAccount: "添加账号", accountBoundary: "账号和密钥只保存在 rclone 配置文件中；备份数据库仅引用别名。", noAccounts: "还没有存储账号", noAccountsHint: "添加一个 rclone 远端，连接 S3、WebDAV、SFTP 或其他提供商。",
     test: "测试", testSuccess: "连接测试成功", remoteDeleteConfirm: "确定删除这个存储账号吗？", remoteDeleted: "存储账号已删除", remoteEditHint: "仅显示当前使用的配置。敏感值不会回显，留空即可保持原值。", remoteUpdate: "编辑账号",
     runStatus: "运行状态", phase: "当前阶段", attemptLabel: "第 {current}/{total} 次尝试", targetProgress: "存储目标", showPassword: "显示密码", hidePassword: "隐藏密码",
+    elapsed: "已运行 {time}", duration: "总用时 {time}", updatedAgo: "{time}前更新", targetElapsed: "用时 {time}", remoteCheckLiveHint: "状态来自后端实时记录；仅实际开始连接的目标显示为检查中，单次命令超过 25 秒会自动停止。", checkedTargets: "已处理 {done}/{total}",
     pending: "等待中", checking: "检查连接", ready: "连接可用", uploading: "上传中", success: "成功", failed: "失败", unavailable: "不可用", running: "运行中", retrying: "等待重试",
     checking_destinations: "检查存储目标", preparing_files: "准备文件", creating_archive: "创建归档", retention: "执行保留策略", completed: "备份完成",
     globalSettings: "全局设置", notConfigured: "未配置", configured: "已启用", globalNotificationHint: "所有手动与定时备份共用这一套通知配置。",
@@ -63,7 +64,7 @@ const translations = {
     enabledHint: "The scheduler will use this schedule after saving", scheduleFrequency: "Frequency", daily: "Daily", weekly: "Weekly", monthly: "Monthly", everyHours: "Every few hours", everyMinutes: "Every few minutes", everySeconds: "Every few seconds", runAt: "Run at", weekday: "Weekday", monthday: "Day of month", monthdayHint: "Months without this date are skipped", interval: "Interval", hoursUnit: "hours", minutesUnit: "minutes", secondsUnit: "seconds", monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday", thursday: "Thursday", friday: "Friday", saturday: "Saturday", sunday: "Sunday", schedulePreview: "{summary}",
     sourcesTargets: "Sources & destinations",
     sourcesTargetsHint: "Multiple folders and rclone remotes are supported", folders: "Backup folders", add: "Add",
-    remoteTargets: "Remote destinations", remoteCheckConcurrency: "Concurrent destination checks", remoteCheckConcurrencyHint: "Maximum destinations checked or created at the same time", rcloneFlags: "Global rclone flags", flagsHint: "Parsed with shell-style quoting but never executed through a shell",
+    remoteTargets: "Remote destinations", remoteCheckConcurrency: "Concurrent destination checks", remoteCheckConcurrencyHint: "Maximum destinations checked or created at the same time", uploadConcurrency: "Concurrent uploads", uploadConcurrencyHint: "Maximum simultaneous destination uploads; 2–3 is a good start for 10 targets", rcloneFlags: "Global rclone flags", flagsHint: "Parsed with shell-style quoting but never executed through a shell",
     none: "None", archiveEncryption: "Archive & encryption", archiveEncryptionHint: "Create a standard archive that can be downloaded and extracted directly", backupRetentionPolicy: "Backup retention policy", backupRetentionHint: "Clean up old backups by age or count; enable either independently",
     archiveType: "Archive format", archivePassword: "Archive password (optional)", fileSuffix: "Filename time format",
     secureArchive: "7z · Security first (recommended)", compatibleArchive: "ZIP · Compatibility first", nativeDirectory: "Native directory · Restore with rclone",
@@ -73,13 +74,13 @@ const translations = {
     exponential: "Exponential", fixed: "Fixed interval", initialDelay: "Initial delay (seconds)", maxDelay: "Maximum delay (seconds)",
     notifications: "Notifications", notificationsHint: "Ping, Email, ServerChan, and ntfy", smtpHint: "Send mail on success or failure",
     recipient: "Recipient", smtpHost: "SMTP host", smtpPort: "Port", smtpSecurity: "Connection security", smtpStarttls: "STARTTLS (recommended)", smtpTls: "TLS", smtpFrom: "From address", smtpUsername: "Username", smtpPassword: "Password", smtpPasswordHint: "A saved password appears masked. Leave it unchanged to keep using it.", serverChanHint: "Push run status with a SendKey",
-    cancel: "Cancel", savePlan: "Save plan", runLog: "Run log", runProgress: "Run progress", technicalLog: "Technical log", label: "Name", path: "Absolute path",
+    cancel: "Cancel", close: "Close", remove: "Remove", themeToggle: "Change theme", switchLanguage: "Switch language", menuOpen: "Open menu", menuClose: "Close menu", primaryNavigation: "Primary navigation", metrics: "Metrics", savePlan: "Save plan", runLog: "Run log", runProgress: "Run progress", technicalLog: "Technical log", label: "Name", path: "Absolute path",
     remoteName: "Rclone remote", remoteDir: "Remote directory", edit: "Edit", runNow: "Run now", delete: "Delete",
     source: "Sources", target: "Targets", retry: "Retry", attempts: "attempts", enabledBadge: "Enabled", disabledBadge: "Disabled",
     manual: "Manual", scheduleTrigger: "Scheduled", cli: "CLI", noRuns: "No runs yet", viewLog: "View log",
     saveSuccess: "Plan saved", deleteConfirm: "Delete this plan? Run history will be kept.", deleteSuccess: "Plan deleted",
     runQueued: "Backup run queued", loadError: "Failed to load", formInvalid: "Check the required fields in the form.",
-    rcloneWaiting: "Waiting for storage setup", rcloneWaitingHint: "The service stays online, but no backup can start until at least one rclone remote is detected.",
+    rcloneWaiting: "Waiting for storage setup", rcloneWaitingHint: "The service stays online, but no backup can start until at least one rclone remote is detected.", rcloneQuarantined: "rclone state needs recovery", rcloneQuarantinedHint: "The previous job's stop state could not be confirmed. New backups are paused to protect the source and concurrency boundary; restart the service before running again.", restartRequired: "Service restart required",
     configureStorage: "Configure storage", storageIntro: "Choose a provider, an rclone alias, and the credentials required by that service. Sensitive values go directly to rclone for encrypted storage.",
     rcloneAlias: "Rclone alias", provider: "Storage provider", loadingProviders: "Loading providers…",
     advancedOptions: "Advanced options", saveAndTest: "Save & test", savingAndTesting: "Saving & testing…", providerRequired: "Choose a storage provider.",
@@ -89,6 +90,7 @@ const translations = {
     storageAccounts: "Storage accounts", addAccount: "Add account", accountBoundary: "Accounts and credentials live only in rclone.conf; the backup database stores alias references only.", noAccounts: "No storage accounts yet", noAccountsHint: "Add an rclone remote for S3, WebDAV, SFTP, or another provider.",
     test: "Test", testSuccess: "Connection test passed", remoteDeleteConfirm: "Delete this storage account?", remoteDeleted: "Storage account deleted", remoteEditHint: "Only settings used by this remote are shown. Secrets are never returned; leave them blank to keep the saved value.", remoteUpdate: "Edit account",
     runStatus: "Run status", phase: "Current stage", attemptLabel: "Attempt {current}/{total}", targetProgress: "Storage targets", showPassword: "Show password", hidePassword: "Hide password",
+    elapsed: "Running for {time}", duration: "Duration {time}", updatedAgo: "Updated {time} ago", targetElapsed: "{time}", remoteCheckLiveHint: "Status comes from backend checkpoints. Only active connections show as checking, and each command is stopped after 25 seconds.", checkedTargets: "{done}/{total} processed",
     pending: "Pending", checking: "Checking", ready: "Ready", uploading: "Uploading", success: "Succeeded", failed: "Failed", unavailable: "Unavailable", running: "Running", retrying: "Retrying",
     checking_destinations: "Checking destinations", preparing_files: "Preparing files", creating_archive: "Creating archive", retention: "Applying retention", completed: "Backup completed",
     globalSettings: "Global settings", notConfigured: "Not configured", configured: "Enabled", globalNotificationHint: "All manual and scheduled backups share this notification configuration.",
@@ -116,7 +118,27 @@ let navigationPointer = null;
 let pageAnimation = null;
 
 function t(key) { return translations[state.language][key] || key; }
-function icon(name) { return `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`; }
+function icon(name) { return `<svg class="sui-icon" aria-hidden="true"><use href="#i-${name}"/></svg>`; }
+
+function applyFrameworkComponents(root = document) {
+  $$(".button", root).forEach((node) => {
+    node.classList.add("sui-button");
+    if (node.classList.contains("ghost")) node.classList.add("sui-tertiary");
+  });
+  $$(".icon-button, .language-button", root).forEach((node) => node.classList.add("sui-button", "sui-tertiary"));
+  $$(".nav-item", root).forEach((node) => node.classList.add("sui-menu-item"));
+  $$(".plan-card, .account-card, .history-card, .notification-panel", root).forEach((node) => node.classList.add("sui-card"));
+  $$("dialog", root).forEach((node) => node.classList.add("sui-dialog", "sui-modal"));
+  $$(".disclosure, .advanced-provider", root).forEach((node) => node.classList.add("sui-details"));
+  $$(".badge", root).forEach((node) => node.classList.add("sui-chip"));
+  $$("input", root).forEach((node) => {
+    if (["checkbox", "radio"].includes(node.type)) {
+      if (!node.closest(".switch-field, .compact-switch")) node.classList.add(node.type === "checkbox" ? "sui-checkbox" : "sui-radio");
+    } else node.classList.add("sui-input");
+  });
+  $$("select", root).forEach((node) => node.classList.add("sui-select"));
+  $$("svg:not(.icon-sprite)", root).forEach((node) => node.classList.add("sui-icon"));
+}
 function escapeHtml(value = "") {
   const node = document.createElement("div");
   node.textContent = String(value);
@@ -142,9 +164,12 @@ function applyPreferences() {
   $("#languageButton span").textContent = state.language === "zh" ? "中文" : "EN";
   $("#newPlanButton").setAttribute("aria-label", t("newPlan"));
   $$("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });
+  $$("[data-i18n-aria-label]").forEach((node) => { node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel)); });
+  $$("[data-i18n-tooltip]").forEach((node) => { node.dataset.tooltip = t(node.dataset.i18nTooltip); });
   $$("[data-feedback-key]").forEach((node) => { node.textContent = t(node.dataset.feedbackKey); });
   const passwordToggle = $("[data-action=\"toggle-password\"]");
   if (passwordToggle) passwordToggle.setAttribute("aria-label", t(passwordToggle.getAttribute("aria-pressed") === "true" ? "hidePassword" : "showPassword"));
+  $("#menuButton").setAttribute("aria-label", t(document.body.classList.contains("menu-open") ? "menuClose" : "menuOpen"));
   if ($("#planDialog")?.open) { updateArchiveHint(); updateScheduleBuilder(); }
   if ($("#remoteDialog")?.open) $("#remoteDialogTitle").textContent = state.editingRemote ? t("remoteUpdate") : t("configureStorage");
   renderPage(state.page);
@@ -207,6 +232,7 @@ function initializeNavigation() {
 function setMenuOpen(open) {
   document.body.classList.toggle("menu-open", open);
   $("#menuButton").setAttribute("aria-expanded", String(open));
+  $("#menuButton").setAttribute("aria-label", t(open ? "menuClose" : "menuOpen"));
 }
 
 function toast(message, error = false) {
@@ -246,6 +272,7 @@ function render(syncNotifications = false) {
   renderNotifications(syncNotifications);
   renderRuns();
   renderStatus();
+  applyFrameworkComponents();
 }
 
 function renderNotifications(syncFromServer = false) {
@@ -316,10 +343,15 @@ async function saveNotifications(event) {
 
 function renderStatus() {
   const ready = Boolean(state.status?.rclone_ready);
+  const quarantined = Boolean(state.status?.rclone_quarantined);
   $("#readinessBanner").hidden = ready;
-  $(".hero-status span:last-child").textContent = ready ? t("schedulerActive") : t("schedulerWaiting");
+  const banner = $("#readinessBanner");
+  $("strong", banner).textContent = t(quarantined ? "rcloneQuarantined" : "rcloneWaiting");
+  $("p", banner).textContent = t(quarantined ? "rcloneQuarantinedHint" : "rcloneWaitingHint");
+  $("#configureRemoteButton").hidden = quarantined;
+  $(".hero-status span:last-child").textContent = quarantined ? t("restartRequired") : ready ? t("schedulerActive") : t("schedulerWaiting");
   $(".hero-status .pulse").style.background = ready ? "var(--success)" : "var(--accent)";
-  $(".sidebar-foot > span:nth-child(2)").textContent = ready ? t("serviceOnline") : t("rcloneWaiting");
+  $(".sidebar-foot > span:nth-child(2)").textContent = quarantined ? t("restartRequired") : ready ? t("serviceOnline") : t("rcloneWaiting");
 }
 
 function renderMetrics() {
@@ -373,17 +405,58 @@ function renderRuns() {
 }
 
 function parseRunProgress(run) {
-  const progress = { phase: run.status, targets: new Map(), log: [] };
+  const progress = { phase: run.status, phaseAt: null, updatedAt: null, targets: new Map(), log: [] };
   for (const line of (run.log || "").split("\n")) {
     const marker = line.indexOf("@event ");
     if (marker < 0) { if (line) progress.log.push(line); continue; }
     try {
       const event = JSON.parse(line.slice(marker + 7));
-      if (event.kind === "phase") progress.phase = event.phase;
-      if (event.kind === "target") progress.targets.set(`${event.name}\u0000${event.directory || ""}`, event);
+      const eventTime = Date.parse(event.at);
+      if (Number.isFinite(eventTime) && (!progress.updatedAt || eventTime > Date.parse(progress.updatedAt))) progress.updatedAt = event.at;
+      if (event.kind === "phase") {
+        progress.phase = event.phase;
+        progress.phaseAt = event.at || progress.phaseAt;
+      }
+      if (event.kind === "target") {
+        const key = `${event.name}\u0000${event.directory || ""}`;
+        const previous = progress.targets.get(key);
+        const startedAt = event.status === "pending"
+          ? null
+          : ["checking", "uploading"].includes(event.status) ? event.at : previous?.startedAt;
+        progress.targets.set(key, { ...event, startedAt });
+      }
     } catch { progress.log.push(line); }
   }
   return progress;
+}
+
+function formatDuration(milliseconds) {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  if (state.language === "zh") return hours ? `${hours}时 ${minutes}分` : minutes ? `${minutes}分 ${rest}秒` : `${rest}秒`;
+  return hours ? `${hours}h ${minutes}m` : minutes ? `${minutes}m ${rest}s` : `${rest}s`;
+}
+
+function updateRunTimers(root = document) {
+  const now = Date.now();
+  $$('[data-duration-start]', root).forEach((node) => {
+    const start = Date.parse(node.dataset.durationStart);
+    const end = node.dataset.durationEnd ? Date.parse(node.dataset.durationEnd) : now;
+    if (Number.isFinite(start) && Number.isFinite(end)) node.textContent = t(node.dataset.durationKey || "targetElapsed").replace("{time}", formatDuration(end - start));
+  });
+  $$('[data-relative-at]', root).forEach((node) => {
+    const at = Date.parse(node.dataset.relativeAt);
+    if (Number.isFinite(at)) node.textContent = t("updatedAgo").replace("{time}", formatDuration(now - at));
+  });
+}
+
+function targetIcon(status) {
+  if (["success", "ready"].includes(status)) return "circle-check-big";
+  if (["failed", "unavailable"].includes(status)) return "circle-x";
+  if (status === "pending") return "circle-dashed";
+  return "loader-circle";
 }
 
 function renderOpenRun() {
@@ -395,12 +468,15 @@ function renderOpenRun() {
   const maxAttempts = plan?.retry?.max_attempts || Math.max(1, run.attempt);
   const status = run.status === "success" ? "success" : run.status === "failed" ? "failed" : "running";
   const targets = [...progress.targets.values()];
-  const succeeded = targets.filter((item) => item.status === "success").length;
+  const processed = targets.filter((item) => !["pending", "checking", "uploading"].includes(item.status)).length;
+  const lastUpdated = progress.updatedAt || run.finished_at || run.started_at;
   const overview = $("#runOverview");
-  const signature = JSON.stringify({ status, runStatus: run.status, attempt: run.attempt, maxAttempts, phase: progress.phase, targets });
-  if (overview.dataset.signature !== signature) overview.innerHTML = `<div class="run-summary ${status}"><span class="run-state-icon">${icon(status === "success" ? "check" : status === "failed" ? "x" : "clock")}</span><div><small>${escapeHtml(t("runStatus"))}</small><strong>${escapeHtml(t(run.status))}</strong><span>${escapeHtml(t("attemptLabel").replace("{current}", run.attempt).replace("{total}", maxAttempts))}</span></div><div class="run-phase" role="status"><small>${escapeHtml(t("phase"))}</small><strong>${escapeHtml(t(progress.phase))}</strong></div></div>
-    <div class="target-progress"><h3>${escapeHtml(t("targetProgress"))}<span>${succeeded}/${targets.length}</span></h3>${targets.length ? targets.map((target) => `<article class="target-status ${escapeHtml(target.status)}"><span class="target-icon">${icon(target.status === "success" || target.status === "ready" ? "check" : target.status === "failed" || target.status === "unavailable" ? "x" : "clock")}</span><div><strong>${escapeHtml(target.name)}</strong><small>${escapeHtml(target.directory || "")}${target.detail ? ` · ${escapeHtml(target.detail)}` : ""}</small></div><b>${escapeHtml(t(target.status))}</b></article>`).join("") : `<p class="target-empty">${escapeHtml(t("checking_destinations"))}</p>`}</div>`;
+  const signature = JSON.stringify({ language: state.language, status, runStatus: run.status, attempt: run.attempt, maxAttempts, phase: progress.phase, targets });
+  if (overview.dataset.signature !== signature) overview.innerHTML = `<div class="run-summary ${status}"><span class="run-state-icon">${icon(status === "success" ? "circle-check-big" : status === "failed" ? "circle-x" : "loader-circle")}</span><div><small>${escapeHtml(t("runStatus"))}</small><strong>${escapeHtml(t(run.status))}</strong><span>${escapeHtml(t("attemptLabel").replace("{current}", run.attempt).replace("{total}", maxAttempts))}</span><span class="run-timing"><span data-duration-start="${escapeHtml(run.started_at)}" ${status === "running" ? "" : `data-duration-end="${escapeHtml(run.finished_at || lastUpdated)}"`} data-duration-key="${status === "running" ? "elapsed" : "duration"}"></span><i aria-hidden="true"></i><span data-relative-at="${escapeHtml(lastUpdated)}"></span></span></div><div class="run-phase" role="status"><small>${escapeHtml(t("phase"))}</small><strong>${escapeHtml(t(progress.phase))}</strong></div></div>
+    <div class="target-progress"><div class="target-progress-head"><h3>${escapeHtml(t("targetProgress"))}<span>${escapeHtml(t("checkedTargets").replace("{done}", processed).replace("{total}", targets.length))}</span></h3>${targets.length ? `<progress class="sui-progress" max="${targets.length}" value="${processed}" aria-label="${escapeHtml(t("targetProgress"))}">${processed}/${targets.length}</progress>` : ""}</div>${status === "running" && progress.phase === "checking_destinations" ? `<p class="sui-callout sui-info progress-note">${icon("info")}<span>${escapeHtml(t("remoteCheckLiveHint"))}</span></p>` : ""}${targets.length ? `<div class="target-list">${targets.map((target) => `<article class="target-status ${escapeHtml(target.status)}"><span class="target-icon">${icon(targetIcon(target.status))}</span><div><strong>${escapeHtml(target.name)}</strong><small>${escapeHtml(target.directory || "")}${target.detail ? ` · ${escapeHtml(target.detail)}` : ""}</small></div><span class="target-state"><b>${escapeHtml(t(target.status))}</b>${target.startedAt ? `<small data-duration-start="${escapeHtml(target.startedAt)}" ${!["checking", "uploading"].includes(target.status) && target.at ? `data-duration-end="${escapeHtml(target.at)}"` : ""}></small>` : ""}</span></article>`).join("")}</div>` : `<p class="target-empty">${escapeHtml(t("checking_destinations"))}</p>`}</div>`;
   overview.dataset.signature = signature;
+  applyFrameworkComponents(overview);
+  updateRunTimers(overview);
   const pre = $("#logContent");
   pre.textContent = progress.log.join("\n") || t("noRuns");
   if (["running", "retrying"].includes(run.status)) pre.scrollTop = pre.scrollHeight;
@@ -439,7 +515,7 @@ function openPlan(plan = null) {
     sources: [{ name: "data", path: "/data" }], remotes: [{ name: "RcloneBackup", directory: "/RcloneBackup/" }],
     archive: { kind: "7z", password: "", password_hint: "", suffix: "%Y%m%d-%H%M%S" },
     retention: { keep_days: 0, keep_count: 0 }, retry: { max_attempts: 3, initial_delay_seconds: 10, max_delay_seconds: 300, backoff: "exponential" },
-    notifications: { ping: {}, mail: {}, serverchan: {} }, rclone_flags: [], remote_check_concurrency: 4,
+    notifications: { ping: {}, mail: {}, serverchan: {} }, rclone_flags: [], remote_check_concurrency: 4, upload_concurrency: 1,
   };
   for (const [name, value] of Object.entries({
     name: data.name, schedule: data.schedule, timezone: data.timezone, enabled: data.enabled,
@@ -447,7 +523,7 @@ function openPlan(plan = null) {
     archive_suffix: data.archive.suffix, archive_password_hint: data.archive.password_hint || "", keep_days: data.retention.keep_days || 30, keep_count: data.retention.keep_count || 10,
     keep_days_enabled: data.retention.keep_days > 0, keep_count_enabled: data.retention.keep_count > 0,
     retry_count: Math.max(0, data.retry.max_attempts - 1), initial_delay: data.retry.initial_delay_seconds, max_delay: data.retry.max_delay_seconds,
-    backoff: data.retry.backoff, remote_check_concurrency: data.remote_check_concurrency ?? 4,
+    backoff: data.retry.backoff, remote_check_concurrency: data.remote_check_concurrency ?? 4, upload_concurrency: data.upload_concurrency ?? 1,
   })) {
     const input = form.elements[name];
     if (!input) continue;
@@ -592,6 +668,7 @@ function collectPlan() {
     notifications: { ping: {}, mail: {}, serverchan: {} },
     rclone_flags: splitArgs(value("rclone_flags")),
     remote_check_concurrency: number("remote_check_concurrency"),
+    upload_concurrency: number("upload_concurrency"),
   };
 }
 
@@ -1110,3 +1187,6 @@ setInterval(async () => {
     } catch {}
   }
 }, 5000);
+setInterval(() => {
+  if ($("#logDialog").open) updateRunTimers($("#runOverview"));
+}, 1000);

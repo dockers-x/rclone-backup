@@ -19,6 +19,7 @@ RUN apk add --no-cache 7zip ca-certificates curl s-nail tzdata \
     && mkdir -p /config/rclone /tmp/rclone-backup
 
 COPY --from=builder /src/target/release/rclone-backup /usr/local/bin/rclone-backup
+COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/licenses/rclone-backup/
 
 EXPOSE 8080
 VOLUME ["/config"]

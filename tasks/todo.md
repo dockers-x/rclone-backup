@@ -34,3 +34,10 @@
     desktop and 375px.
   - Files: `web/index.html`, `web/app.js`, `web/app.css`, `src/main.rs`,
     `src/schedule.rs`.
+- [x] Add bounded multi-destination uploads.
+  - Acceptance: existing plans default to serial behavior; values 1–8 bound
+    active copy jobs; queued and active target states remain truthful; all
+    destination failures are aggregated after sibling jobs finish.
+  - Verify: model/runner tests, full workspace checks, and agent-browser review.
+  - Files: `crates/core/src/model.rs`, `crates/runner/src/lib.rs`, `web/index.html`,
+    `web/app.js`, `docs/spec-upload-concurrency.md`.

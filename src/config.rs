@@ -234,6 +234,7 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
         },
         rclone_flags: split_args(&get("RCLONE_GLOBAL_FLAG")),
         remote_check_concurrency: DEFAULT_REMOTE_CHECK_CONCURRENCY,
+        upload_concurrency: DEFAULT_UPLOAD_CONCURRENCY,
     };
     if let Err(reason) = input.notifications.normalize_legacy_mail() {
         tracing::warn!(%reason, "legacy SMTP configuration was disabled during migration");

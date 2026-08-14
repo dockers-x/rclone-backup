@@ -54,7 +54,6 @@ async fn prepare(config: &AppConfig) -> anyhow::Result<(Store, Runner)> {
     {
         tokio::fs::create_dir_all(parent).await?;
     }
-    tokio::fs::create_dir_all(&config.work_dir).await?;
     if let Some(parent) = std::path::Path::new(&config.rclone_config).parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -69,6 +68,7 @@ async fn prepare(config: &AppConfig) -> anyhow::Result<(Store, Runner)> {
         info!(plans = plans.len(), "imported environment configuration");
     }
     let rc = RcloneRc::start(&config.rclone_config).await?;
+    Runner::prepare_workspaces(&config.work_dir).await?;
     Ok((store.clone(), Runner::new(store, &config.work_dir, rc)))
 }
 

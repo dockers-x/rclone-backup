@@ -6,6 +6,8 @@ use uuid::Uuid;
 pub const REDACTED: &str = "••••••••";
 pub const DEFAULT_REMOTE_CHECK_CONCURRENCY: usize = 4;
 pub const MAX_REMOTE_CHECK_CONCURRENCY: usize = 32;
+pub const DEFAULT_UPLOAD_CONCURRENCY: usize = 1;
+pub const MAX_UPLOAD_CONCURRENCY: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Plan {
@@ -25,6 +27,8 @@ pub struct Plan {
     pub rclone_flags: Vec<String>,
     #[serde(default = "default_remote_check_concurrency")]
     pub remote_check_concurrency: usize,
+    #[serde(default = "default_upload_concurrency")]
+    pub upload_concurrency: usize,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -54,6 +58,8 @@ pub struct PlanInput {
     pub rclone_flags: Vec<String>,
     #[serde(default = "default_remote_check_concurrency")]
     pub remote_check_concurrency: usize,
+    #[serde(default = "default_upload_concurrency")]
+    pub upload_concurrency: usize,
 }
 
 impl PlanInput {
@@ -85,10 +91,29 @@ impl PlanInput {
         }) {
             return Err("source names must produce unique archive folder names".into());
         }
+        let mut remote_destinations = std::collections::HashSet::new();
         for remote in &self.remotes {
             validate_label(&remote.name, "remote name")?;
             if remote.directory.contains('\0') || remote.directory.contains('\n') {
                 return Err("remote directory contains invalid characters".into());
+            }
+            if remote.directory.contains("//")
+                || remote
+                    .directory
+                    .split('/')
+                    .any(|segment| matches!(segment, "." | ".."))
+            {
+                return Err(
+                    "remote directory cannot contain dot segments or repeated separators".into(),
+                );
+            }
+            let destination = format!(
+                "{}:{}",
+                remote.name.trim(),
+                remote.directory.trim_end_matches('/')
+            );
+            if !remote_destinations.insert(destination) {
+                return Err("rclone destinations must be unique".into());
             }
         }
         if !matches!(self.archive.kind.as_str(), "zip" | "7z" | "none") {
@@ -138,6 +163,11 @@ impl PlanInput {
                 "remote check concurrency must be between 1 and {MAX_REMOTE_CHECK_CONCURRENCY}"
             ));
         }
+        if !(1..=MAX_UPLOAD_CONCURRENCY).contains(&self.upload_concurrency) {
+            return Err(format!(
+                "upload concurrency must be between 1 and {MAX_UPLOAD_CONCURRENCY}"
+            ));
+        }
         const BLOCKED_FLAGS: &[&str] = &[
             "--config",
             "--password-command",
@@ -181,6 +211,7 @@ impl PlanInput {
             notifications: self.notifications,
             rclone_flags: self.rclone_flags,
             remote_check_concurrency: self.remote_check_concurrency,
+            upload_concurrency: self.upload_concurrency,
             created_at,
             updated_at: Utc::now(),
         }
@@ -1540,6 +1571,9 @@ fn default_timezone() -> String {
 const fn default_remote_check_concurrency() -> usize {
     DEFAULT_REMOTE_CHECK_CONCURRENCY
 }
+const fn default_upload_concurrency() -> usize {
+    DEFAULT_UPLOAD_CONCURRENCY
+}
 fn default_suffix() -> String {
     "%Y%m%d-%H%M%S".into()
 }
@@ -1577,6 +1611,14 @@ mod tests {
             input.remote_check_concurrency,
             DEFAULT_REMOTE_CHECK_CONCURRENCY
         );
+        assert!(input.validate().is_ok());
+    }
+
+    #[test]
+    fn upload_concurrency_defaults_to_serial_for_existing_plans() {
+        let input = valid_plan_input();
+
+        assert_eq!(input.upload_concurrency, DEFAULT_UPLOAD_CONCURRENCY);
         assert!(input.validate().is_ok());
     }
 
@@ -1745,6 +1787,54 @@ mod tests {
             assert_eq!(
                 input.validate().unwrap_err(),
                 "remote check concurrency must be between 1 and 32"
+            );
+        }
+    }
+
+    #[test]
+    fn upload_concurrency_accepts_documented_range() {
+        for concurrency in [1, MAX_UPLOAD_CONCURRENCY] {
+            let mut input = valid_plan_input();
+            input.upload_concurrency = concurrency;
+            assert!(input.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn upload_concurrency_rejects_values_outside_documented_range() {
+        for concurrency in [0, MAX_UPLOAD_CONCURRENCY + 1] {
+            let mut input = valid_plan_input();
+            input.upload_concurrency = concurrency;
+            assert_eq!(
+                input.validate().unwrap_err(),
+                "upload concurrency must be between 1 and 8"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_rclone_destinations_are_rejected_after_path_normalization() {
+        let mut input = valid_plan_input();
+        input.remotes.push(RemoteConfig {
+            name: "remote".into(),
+            directory: "/backup/".into(),
+        });
+
+        assert_eq!(
+            input.validate().unwrap_err(),
+            "rclone destinations must be unique"
+        );
+    }
+
+    #[test]
+    fn ambiguous_rclone_destination_paths_are_rejected() {
+        for directory in ["/backup/.", "/backup/../other", "/backup//daily"] {
+            let mut input = valid_plan_input();
+            input.remotes[0].directory = directory.into();
+
+            assert_eq!(
+                input.validate().unwrap_err(),
+                "remote directory cannot contain dot segments or repeated separators"
             );
         }
     }
