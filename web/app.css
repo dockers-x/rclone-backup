@@ -348,6 +348,28 @@ dialog { color: var(--text); }
 .wizard-intro { margin: 0 0 20px; color: var(--text-secondary); font-size: 13px; }
 .provider-description { margin: 14px 0 0; color: var(--text-tertiary); font-size: 12px; }
 .provider-fields { margin-top: 18px; }
+.provider-combobox { position: relative; min-width: 0; }
+.provider-combobox > .sui-input { padding-right: 48px; }
+.provider-combobox-toggle {
+  position: absolute; top: 0; right: 0; width: 44px; height: 44px; padding: 0;
+  display: grid; place-items: center; color: var(--text-tertiary); background: transparent; border: 0;
+}
+.provider-combobox-toggle svg { width: 17px; height: 17px; }
+.provider-combobox-toggle:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: 9px; }
+.provider-combobox-list {
+  position: absolute; inset: calc(100% + 6px) 0 auto; z-index: 12;
+  max-height: min(288px, 40vh); padding: 5px; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow);
+}
+.provider-combobox-list[hidden] { display: none; }
+.provider-combobox-list.open-up { inset: auto 0 calc(100% + 6px); }
+.provider-combobox-option {
+  min-height: 42px; padding: 7px 10px; display: grid; grid-template-columns: minmax(110px, auto) minmax(0, 1fr);
+  align-items: center; gap: 14px; color: var(--text); border: 0;
+}
+.provider-combobox-option strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.provider-combobox-option small { overflow: hidden; color: var(--text-tertiary); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.provider-combobox-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .provider-add-field { margin-top: 18px; padding-top: 18px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; border-top: 1px solid var(--border); }
 .provider-add-field[hidden] { display: none; }
 .advanced-provider { margin-top: 18px; border-top: 1px solid var(--border); }

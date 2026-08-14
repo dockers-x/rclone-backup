@@ -26,7 +26,7 @@ docker run -d \
   -p 127.0.0.1:8080:8080 \
   -v rclone-backup-data:/config \
   -v /path/to/backup:/data:ro \
-  czyt/rclone-backup:2.0.8
+  czyt/rclone-backup:2.0.9
 ```
 
 Open `http://127.0.0.1:8080`. On a fresh installation the service displays the storage wizard and remains running. Scheduled and manual backups stay locked until at least one working rclone alias exists.

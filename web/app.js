@@ -36,7 +36,7 @@ const translations = {
     configureStorage: "配置存储", storageIntro: "选择存储提供商，输入 rclone 别名和该服务要求的凭据。敏感字段直接交给 rclone 加密保存。",
     rcloneAlias: "Rclone 别名", provider: "存储提供商", loadingProviders: "正在加载提供商…",
     advancedOptions: "高级选项", saveAndTest: "保存并测试", savingAndTesting: "正在保存并测试…", providerRequired: "请选择存储提供商。",
-    addConfigurationItem: "添加配置项", chooseConfigurationItem: "选择需要添加的配置项…", configuredSecret: "已配置，留空保持不变", remoteSavedVerified: "配置已写入，并通过连接验证。", remoteSavedUnverified: "配置已写入，但连接验证失败。请检查参数后重试测试。",
+    addConfigurationItem: "添加配置项", chooseConfigurationItem: "选择需要添加的配置项…", configuredSecret: "已配置，留空保持不变", remoteSavedVerified: "配置已写入，并通过连接验证。", remoteSavedUnverified: "配置已写入，但连接验证失败。请检查参数后重试测试。", endpointNeedsScheme: "S3 Endpoint 必须以 http:// 或 https:// 开头。",
     remoteCreated: "存储配置已保存，正在测试连接…", remoteReady: "存储连接成功。调度器已解锁。",
     remoteNeedsInput: "rclone 需要更多信息，请完成下方步骤。", authenticationOff: "认证未启用",
     storageAccounts: "存储账号", addAccount: "添加账号", accountBoundary: "账号和密钥只保存在 rclone 配置文件中；备份数据库仅引用别名。", noAccounts: "还没有存储账号", noAccountsHint: "添加一个 rclone 远端，连接 S3、WebDAV、SFTP 或其他提供商。",
@@ -84,7 +84,7 @@ const translations = {
     configureStorage: "Configure storage", storageIntro: "Choose a provider, an rclone alias, and the credentials required by that service. Sensitive values go directly to rclone for encrypted storage.",
     rcloneAlias: "Rclone alias", provider: "Storage provider", loadingProviders: "Loading providers…",
     advancedOptions: "Advanced options", saveAndTest: "Save & test", savingAndTesting: "Saving & testing…", providerRequired: "Choose a storage provider.",
-    addConfigurationItem: "Add configuration item", chooseConfigurationItem: "Choose an item to add…", configuredSecret: "Configured. Leave blank to keep it unchanged", remoteSavedVerified: "Configuration written and connection verified.", remoteSavedUnverified: "Configuration was written, but connection verification failed. Check the values and test again.",
+    addConfigurationItem: "Add configuration item", chooseConfigurationItem: "Choose an item to add…", configuredSecret: "Configured. Leave blank to keep it unchanged", remoteSavedVerified: "Configuration written and connection verified.", remoteSavedUnverified: "Configuration was written, but connection verification failed. Check the values and test again.", endpointNeedsScheme: "The S3 endpoint must start with http:// or https://.",
     remoteCreated: "Storage configuration saved. Testing connection…", remoteReady: "Storage connected. The scheduler is now unlocked.",
     remoteNeedsInput: "rclone needs more information. Complete the next step below.", authenticationOff: "Authentication disabled",
     storageAccounts: "Storage accounts", addAccount: "Add account", accountBoundary: "Accounts and credentials live only in rclone.conf; the backup database stores alias references only.", noAccounts: "No storage accounts yet", noAccountsHint: "Add an rclone remote for S3, WebDAV, SFTP, or another provider.",
@@ -105,7 +105,7 @@ const state = {
   theme: localStorage.getItem("theme") || "system",
   plans: [], runs: [], remotes: [], notifications: null, notificationTargets: [], expandedNotificationId: null, status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, remoteVisibleOptions: new Set(), openRunId: null, page: "plans",
 };
-let providerDatalistSequence = 0;
+let providerComboboxSequence = 0;
 
 const pageRoutes = {
   plans: { path: "/plans", title: "backupPlans" },
@@ -744,10 +744,7 @@ function selectProvider() {
   const options = provider.Options || provider.options || [];
   const parameters = state.editingRemote?.parameters || {};
   const configuredSecrets = new Set(state.editingRemote?.configured_secrets || []);
-  state.remoteVisibleOptions = new Set(options.filter((option) => {
-    const name = option.Name || option.name;
-    return !state.editingRemote || Object.hasOwn(parameters, name) || configuredSecrets.has(name);
-  }).map((option) => option.Name || option.name));
+  state.remoteVisibleOptions = new Set(options.map((option) => option.Name || option.name));
   Object.keys(parameters).forEach((name) => state.remoteVisibleOptions.add(name));
   renderProviderFields(parameters);
 }
@@ -829,6 +826,79 @@ function providerOptionValue(option, value) {
   return value;
 }
 
+function closeProviderCombobox(combobox) {
+  const input = $("input", combobox);
+  const list = $('[role="listbox"]', combobox);
+  const toggle = $('[data-action="toggle-provider-combobox"]', combobox);
+  list.hidden = true;
+  input.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.innerHTML = icon("chevron-down");
+}
+
+function openProviderCombobox(combobox, showAll = false) {
+  const input = $("input", combobox);
+  const list = $('[role="listbox"]', combobox);
+  const toggle = $('[data-action="toggle-provider-combobox"]', combobox);
+  const query = showAll ? "" : input.value.trim().toLocaleLowerCase();
+  let visible = 0;
+  $$('[role="option"]', list).forEach((option) => {
+    const matches = !query || option.dataset.search.includes(query);
+    option.hidden = !matches;
+    if (matches) visible += 1;
+  });
+  if (!visible) return closeProviderCombobox(combobox);
+  list.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  toggle.setAttribute("aria-expanded", "true");
+  toggle.innerHTML = icon("chevron-up");
+  const inputRect = input.getBoundingClientRect();
+  const dialogRect = input.closest("dialog")?.getBoundingClientRect();
+  const boundaryTop = Math.max(0, dialogRect?.top ?? 0);
+  const boundaryBottom = Math.min(window.innerHeight, dialogRect?.bottom ?? window.innerHeight);
+  const spaceAbove = inputRect.top - boundaryTop;
+  const spaceBelow = boundaryBottom - inputRect.bottom;
+  list.classList.toggle("open-up", spaceBelow < Math.min(288, window.innerHeight * .4) && spaceAbove > spaceBelow);
+}
+
+function providerCombobox(input, examples, name) {
+  const combobox = document.createElement("div");
+  combobox.className = "provider-combobox";
+  const list = document.createElement("div");
+  list.id = `provider-${name}-options-${++providerComboboxSequence}`;
+  list.className = "provider-combobox-list sui-card";
+  list.role = "listbox";
+  list.hidden = true;
+  input.autocomplete = "off";
+  input.role = "combobox";
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-controls", list.id);
+  input.setAttribute("aria-expanded", "false");
+  examples.filter((example) => String(example.Value ?? example.value ?? "") !== "").forEach((example) => {
+    const value = String(example.Value ?? example.value);
+    const help = String(example.Help || example.help || value).split("\n")[0];
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "provider-combobox-option sui-menu-item";
+    option.role = "option";
+    option.dataset.action = "select-provider-combobox-option";
+    option.dataset.value = value;
+    option.dataset.search = `${value} ${help}`.toLocaleLowerCase();
+    option.append(Object.assign(document.createElement("strong"), { textContent: value }));
+    if (help !== value) option.append(Object.assign(document.createElement("small"), { textContent: help }));
+    list.append(option);
+  });
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "provider-combobox-toggle sui-button sui-tertiary";
+  toggle.dataset.action = "toggle-provider-combobox";
+  toggle.setAttribute("aria-label", providerFieldLabel(name));
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.innerHTML = icon("chevron-down");
+  combobox.append(input, toggle, list);
+  return combobox;
+}
+
 function providerFieldLabel(name) {
   const labels = state.language === "zh" ? {
     url: "网址", vendor: "WebDAV 类型", user: "用户名", pass: "密码", provider: "S3 服务商",
@@ -861,8 +931,12 @@ function providerField(option, existingValue, secretConfigured = false, values =
   const required = !state.editingRemote && (option.Required ?? option.required ?? false);
   const password = secretConfigured || providerFieldIsSecret(option, name);
   const examples = providerOptionExamples(option, values);
-  const rawDefaultValue = existingValue ?? (state.editingRemote ? "" : (option.Default ?? option.default ?? ""));
+  const optionDefaultValue = providerOptionValue(option, option.Default ?? option.default ?? "");
+  const rawDefaultValue = existingValue ?? optionDefaultValue;
   const defaultValue = providerOptionValue(option, rawDefaultValue);
+  const originalValue = state.editingRemote && Object.hasOwn(state.editingRemote.parameters || {}, name)
+    ? providerOptionValue(option, state.editingRemote.parameters[name])
+    : optionDefaultValue;
   const field = document.createElement("label");
   field.className = "field";
   const title = document.createElement("span");
@@ -884,6 +958,7 @@ function providerField(option, existingValue, secretConfigured = false, values =
     }
     if (defaultValue !== null && defaultValue !== undefined) select.value = String(defaultValue);
     select.required = required;
+    select.dataset.initialValue = String(originalValue ?? "");
     field.append(select);
   } else {
     const input = document.createElement("input");
@@ -891,6 +966,7 @@ function providerField(option, existingValue, secretConfigured = false, values =
     input.name = `provider_${name}`;
     input.value = defaultValue === null || defaultValue === undefined ? "" : String(defaultValue);
     input.required = required;
+    input.dataset.initialValue = String(originalValue ?? "");
     input.type = password ? "password" : "text";
     if (password) {
       input.dataset.secret = "true";
@@ -910,19 +986,7 @@ function providerField(option, existingValue, secretConfigured = false, values =
       wrapper.append(toggle);
       field.append(wrapper);
     } else {
-      field.append(input);
-      if (examples.length) {
-        const datalist = document.createElement("datalist");
-        datalist.id = `provider-${name}-examples-${++providerDatalistSequence}`;
-        examples.filter((example) => String(example.Value ?? example.value ?? "") !== "").forEach((example) => {
-          const choice = document.createElement("option");
-          choice.value = String(example.Value ?? example.value);
-          choice.label = String(example.Help || example.help || choice.value).split("\n")[0];
-          datalist.append(choice);
-        });
-        input.setAttribute("list", datalist.id);
-        field.append(datalist);
-      }
+      field.append(examples.length ? providerCombobox(input, examples, name) : input);
     }
   }
   if (secretConfigured) {
@@ -957,6 +1021,14 @@ async function saveRemote(event) {
     $("#remoteError").hidden = false;
     return;
   }
+  const providerType = state.selectedProvider.Name || state.selectedProvider.name || state.selectedProvider.Prefix || state.selectedProvider.prefix;
+  const endpoint = form.elements.provider_endpoint;
+  if (providerType === "s3" && endpoint?.value && !/^https?:\/\//i.test(endpoint.value.trim())) {
+    $("#remoteError").textContent = t("endpointNeedsScheme");
+    $("#remoteError").hidden = false;
+    endpoint.focus();
+    return;
+  }
   const button = $("#remoteSaveButton");
   const buttonLabel = $("span", button);
   button.disabled = true;
@@ -967,10 +1039,15 @@ async function saveRemote(event) {
   try {
     const parameters = {};
     $$('[name^="provider_"]', form).forEach((input) => {
-      if (input.value !== "" || (state.editingRemote && input.dataset.secret !== "true")) parameters[input.name.slice(9)] = input.value;
+      if (state.editingRemote) {
+        if (input.value !== input.dataset.initialValue && (input.value !== "" || input.dataset.secret !== "true")) {
+          parameters[input.name.slice(9)] = input.value;
+        }
+      } else if (input.value !== "" && input.value !== input.dataset.initialValue) {
+        parameters[input.name.slice(9)] = input.value;
+      }
     });
     const name = form.elements.remote_name.value.trim();
-    const providerType = state.selectedProvider.Name || state.selectedProvider.name || state.selectedProvider.Prefix || state.selectedProvider.prefix;
     const payload = { name, type: providerType, parameters };
     if (state.remoteFlow) {
       const flowInput = form.elements.remote_flow_result;
@@ -1053,6 +1130,20 @@ document.addEventListener("click", async (event) => {
       renderProviderFields(values);
       $(`[name="provider_${CSS.escape(name)}"]`, $("#remoteForm"))?.focus();
     }
+  }
+  if (action === "toggle-provider-combobox") {
+    const combobox = button.closest(".provider-combobox");
+    const list = $('[role="listbox"]', combobox);
+    if (list.hidden) openProviderCombobox(combobox, true);
+    else closeProviderCombobox(combobox);
+  }
+  if (action === "select-provider-combobox-option") {
+    const combobox = button.closest(".provider-combobox");
+    const input = $("input", combobox);
+    input.value = button.dataset.value;
+    closeProviderCombobox(combobox);
+    input.focus();
+    input.dispatchEvent(new Event("change", { bubbles: true }));
   }
   if (action === "remove-row") button.closest(".repeat-row").remove();
   const card = button.closest(".plan-card");
@@ -1218,6 +1309,33 @@ $("#remoteForm").addEventListener("submit", saveRemote);
 $("#remoteForm").addEventListener("change", (event) => {
   if (event.target.name !== "provider_provider") return;
   renderProviderFields(currentProviderValues());
+});
+$("#remoteForm").addEventListener("input", (event) => {
+  const combobox = event.target.closest(".provider-combobox");
+  if (combobox && event.target.matches('[role="combobox"]')) openProviderCombobox(combobox);
+});
+$("#remoteForm").addEventListener("keydown", (event) => {
+  const combobox = event.target.closest(".provider-combobox");
+  if (!combobox) return;
+  const input = $("input", combobox);
+  const options = $$('[role="option"]:not([hidden])', combobox);
+  if (event.target === input && event.key === "ArrowDown") {
+    event.preventDefault();
+    openProviderCombobox(combobox);
+    $$('[role="option"]:not([hidden])', combobox)[0]?.focus();
+  } else if (event.target.matches('[role="option"]') && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+    event.preventDefault();
+    const index = options.indexOf(event.target);
+    options[(index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length]?.focus();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeProviderCombobox(combobox);
+    input.focus();
+  }
+});
+document.addEventListener("click", (event) => {
+  const path = event.composedPath();
+  $$(".provider-combobox").filter((combobox) => !path.includes(combobox)).forEach(closeProviderCombobox);
 });
 $("#notificationForm").addEventListener("submit", saveNotifications);
 $("#providerSelect").addEventListener("change", selectProvider);
