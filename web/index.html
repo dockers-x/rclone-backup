@@ -49,7 +49,7 @@
         <a class="nav-item" href="/templates" data-page-link="templates"><svg><use href="#i-edit"/></svg><span data-i18n="notificationTemplates">通知模板</span></a>
         <a class="nav-item" href="/history" data-page-link="history"><svg><use href="#i-history"/></svg><span data-i18n="history">运行历史</span></a>
       </nav>
-      <div class="sidebar-foot"><span class="status-dot"></span><span data-i18n="serviceOnline">服务在线</span><small id="version">v2.1.0</small></div>
+      <div class="sidebar-foot"><span class="status-dot"></span><span data-i18n="serviceOnline">服务在线</span><small id="version">v2.2.0</small></div>
     </aside>
 
     <div class="workspace">
@@ -210,6 +210,12 @@
   </dialog>
 
   <dialog class="log-dialog" id="logDialog" aria-labelledby="runLogTitle"><header class="dialog-header"><div><p class="eyebrow" data-i18n="runProgress">运行进度</p><h2 id="runLogTitle" data-i18n="runLog">运行日志</h2></div><button class="icon-button" type="button" data-action="close-log" data-i18n-aria-label="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header><section class="run-overview" id="runOverview"></section><details class="raw-log"><summary data-i18n="technicalLog">技术日志</summary><pre id="logContent" tabindex="0"></pre></details></dialog>
+
+  <dialog class="confirm-dialog" id="templateDeleteDialog" aria-labelledby="templateDeleteDialogTitle">
+    <div class="dialog-header"><div><p class="eyebrow" data-i18n="notificationTemplates">通知模板</p><h2 id="templateDeleteDialogTitle"></h2></div><button class="icon-button" type="button" data-action="close" data-i18n-aria-label="close" aria-label="关闭"><svg><use href="#i-x"/></svg></button></div>
+    <div class="dialog-body"><p data-i18n="templateDeleteDescription">删除后无法恢复，使用该模板的通知目标必须先切换到其他模板。</p></div>
+    <div class="dialog-footer"><button class="button ghost" type="button" data-action="close" data-i18n="cancel">取消</button><button class="button primary danger-button" type="button" data-action="confirm-delete-template" data-i18n="confirmDeleteTemplate">确认删除</button></div>
+  </dialog>
 
   <dialog class="remote-dialog" id="remoteDialog" aria-labelledby="remoteDialogTitle">
     <form id="remoteForm">

@@ -696,6 +696,8 @@ pub struct NotificationTarget {
 pub struct NotificationTemplate {
     pub id: String,
     pub name: String,
+    #[serde(default = "default_template_language")]
+    pub language: String,
     pub start: NotificationEventTemplate,
     pub success: NotificationEventTemplate,
     pub failure: NotificationEventTemplate,
@@ -712,6 +714,9 @@ impl NotificationTemplate {
             return Err("notification template ID is invalid".into());
         }
         validate_label(&self.name, "notification template name")?;
+        if !matches!(self.language.as_str(), "en" | "zh") {
+            return Err("notification template language must be en or zh".into());
+        }
         self.start.validate()?;
         self.success.validate()?;
         self.failure.validate()?;
@@ -721,6 +726,7 @@ impl NotificationTemplate {
     fn encoded_size(&self) -> usize {
         self.id.len()
             + self.name.len()
+            + self.language.len()
             + self.start.encoded_size()
             + self.success.encoded_size()
             + self.failure.encoded_size()
@@ -733,6 +739,10 @@ impl NotificationTemplate {
             _ => &self.failure,
         }
     }
+}
+
+fn default_template_language() -> String {
+    "en".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -779,7 +789,10 @@ fn validate_template_placeholders(value: &str) -> Result<(), String> {
         let Some(close) = rest.find("}}") else {
             return Err("notification template contains a malformed placeholder".into());
         };
-        if !matches!(&rest[..close], "plan_name" | "event" | "content") {
+        if !matches!(
+            &rest[..close],
+            "plan_name" | "event" | "content" | "time" | "backup_size"
+        ) {
             return Err("notification template contains an unknown placeholder".into());
         }
         rest = &rest[close + 2..];
@@ -1828,6 +1841,16 @@ mod tests {
         assert!(config.targets[0].template_id.is_empty());
         assert_eq!(config.template_for(""), Ok(None));
         assert!(config.validate().is_ok());
+
+        let template: NotificationTemplate = serde_json::from_value(serde_json::json!({
+            "id": "legacy",
+            "name": "Legacy",
+            "start": { "title": "Start", "body": "{{content}}" },
+            "success": { "title": "Success", "body": "{{time}} {{backup_size}}" },
+            "failure": { "title": "Failure", "body": "{{content}}" }
+        }))
+        .unwrap();
+        assert_eq!(template.language, "en");
     }
 
     #[test]
@@ -1836,6 +1859,7 @@ mod tests {
             templates: vec![NotificationTemplate {
                 id: "chinese".into(),
                 name: "中文通知".into(),
+                language: "zh".into(),
                 start: NotificationEventTemplate {
                     title: "{{plan_name}} 开始".into(),
                     body: "{{content}}".into(),
@@ -1879,6 +1903,7 @@ mod tests {
         let mut template = NotificationTemplate {
             id: "invalid".into(),
             name: "Invalid".into(),
+            language: "en".into(),
             start: NotificationEventTemplate {
                 title: "{{plan_name}}".into(),
                 body: "{{content}}".into(),
@@ -1930,6 +1955,7 @@ mod tests {
         let template = NotificationTemplate {
             id: "ops".into(),
             name: "Operations".into(),
+            language: "en".into(),
             start: event.clone(),
             success: event.clone(),
             failure: event.clone(),

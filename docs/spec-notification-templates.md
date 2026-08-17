@@ -76,8 +76,12 @@ save and delivery.
 Each event title and body supports these literal placeholders:
 
 - `{{plan_name}}`: backup plan name
-- `{{event}}`: stable value `start`, `success`, or `failure`
-- `{{content}}`: the event detail currently produced by the runner
+- `{{event}}`: `start`, `success`, or `failure` in English templates; `开始`, `成功`, or `失败` in Chinese templates
+- `{{content}}`: localized event detail produced by the runner; it is not an independently editable field
+- `{{time}}`: event time, including the UTC offset
+- `{{backup_size}}`: human-readable archive or native-directory size, or a localized unavailable value before the payload exists
+
+Each custom template stores `language: "zh" | "en"`, defaulting to English for existing documents. The setting localizes `{{event}}`, `{{content}}`, and unavailable values. It does not translate administrator-authored template text.
 
 No conditions, loops, includes, HTML interpretation, environment-variable
 access, or secret interpolation are supported. Unknown or malformed
@@ -129,7 +133,7 @@ validation, and deterministic dependency-free rendering.
 
 ```rust
 let template = config.template_for(target.template_id.as_deref())?;
-let message = template.render(plan_name, event, content)?;
+let message = template.render(plan_name, event, localized_variables)?;
 deliver_target(target, &message).await;
 ```
 
@@ -174,11 +178,11 @@ deliver_target(target, &message).await;
 - Invalid templates, dangling references, and deletion of referenced templates
   produce clear errors and are not persisted.
 - All test and release gates pass at desktop and 375 px widths.
-- All workspace package versions move from `2.0.9` to `2.1.0`; the change is
-  committed, tag `v2.1.0` is created, and the branch plus tag are pushed to
+- All workspace package versions move from `2.1.0` to `2.2.0`; the change is
+  committed, tag `v2.2.0` is created, and the branch plus tag are pushed to
   `origin`.
 
 ## Open questions
 
 None, provided the independent template library, per-target selection model,
-dedicated navigation entry, and `v2.1.0` release are approved.
+dedicated navigation entry, multilingual variables, and `v2.2.0` release are approved.

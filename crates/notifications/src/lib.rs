@@ -22,6 +22,15 @@ pub struct DeliveryReport {
     pub failed: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct NotificationVariables<'a> {
+    pub content_default: &'a str,
+    pub content_en: &'a str,
+    pub content_zh: &'a str,
+    pub time: &'a str,
+    pub backup_size_bytes: Option<u64>,
+}
+
 impl DeliveryReport {
     fn success(&mut self, target: &str) {
         self.messages.push(format!("Notification {target} sent."));
@@ -40,6 +49,27 @@ pub async fn deliver(
     event: &str,
     content: &str,
 ) -> DeliveryReport {
+    deliver_with_variables(
+        plan_name,
+        config,
+        event,
+        NotificationVariables {
+            content_default: content,
+            content_en: content,
+            content_zh: content,
+            time: "",
+            backup_size_bytes: None,
+        },
+    )
+    .await
+}
+
+pub async fn deliver_with_variables(
+    plan_name: &str,
+    config: &NotificationConfig,
+    event: &str,
+    variables: NotificationVariables<'_>,
+) -> DeliveryReport {
     let mut report = DeliveryReport::default();
     for target in &config.targets {
         if target.enabled && event_enabled(target, event) {
@@ -50,7 +80,8 @@ pub async fn deliver(
                     continue;
                 }
             };
-            let (title, body) = render_message(plan_name, event, content, template);
+            let (title, body) =
+                render_message_with_variables(plan_name, event, variables, template);
             deliver_target(target, event, &title, &body, &mut report).await;
         }
     }
@@ -104,23 +135,99 @@ fn subject(plan_name: &str, event: &str) -> String {
     )
 }
 
+#[cfg(test)]
 fn render_message(
     plan_name: &str,
     event: &str,
     content: &str,
     template: Option<&NotificationTemplate>,
 ) -> (String, String) {
+    render_message_with_variables(
+        plan_name,
+        event,
+        NotificationVariables {
+            content_default: content,
+            content_en: content,
+            content_zh: content,
+            time: "",
+            backup_size_bytes: None,
+        },
+        template,
+    )
+}
+
+fn render_message_with_variables(
+    plan_name: &str,
+    event: &str,
+    variables: NotificationVariables<'_>,
+    template: Option<&NotificationTemplate>,
+) -> (String, String) {
     let Some(template) = template else {
         return (
             sanitize_title(&subject(plan_name, event)),
-            content.to_owned(),
+            variables.content_default.to_owned(),
         );
     };
-    let template = template.event(event);
+    let language = template.language.as_str();
+    let message = template.event(event);
     (
-        sanitize_title(&render_value(&template.title, plan_name, event, content)),
-        render_value(&template.body, plan_name, event, content),
+        sanitize_title(&render_value(
+            &message.title,
+            plan_name,
+            localized_event(event, language),
+            localized_content(variables, language),
+            variables.time,
+            &format_backup_size(variables.backup_size_bytes, language),
+        )),
+        render_value(
+            &message.body,
+            plan_name,
+            localized_event(event, language),
+            localized_content(variables, language),
+            variables.time,
+            &format_backup_size(variables.backup_size_bytes, language),
+        ),
     )
+}
+
+fn localized_event<'a>(event: &'a str, language: &str) -> &'a str {
+    match (language, event) {
+        ("zh", "start") => "开始",
+        ("zh", "success") => "成功",
+        ("zh", "failure") => "失败",
+        _ => event,
+    }
+}
+
+fn localized_content<'a>(variables: NotificationVariables<'a>, language: &str) -> &'a str {
+    if language == "zh" {
+        variables.content_zh
+    } else {
+        variables.content_en
+    }
+}
+
+fn format_backup_size(bytes: Option<u64>, language: &str) -> String {
+    let Some(bytes) = bytes else {
+        return if language == "zh" {
+            "暂不可用"
+        } else {
+            "Not available"
+        }
+        .into();
+    };
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.2} {}", UNITS[unit])
+    }
 }
 
 fn sanitize_title(value: &str) -> String {
@@ -137,7 +244,14 @@ fn sanitize_title(value: &str) -> String {
         .collect()
 }
 
-fn render_value(template: &str, plan_name: &str, event: &str, content: &str) -> String {
+fn render_value(
+    template: &str,
+    plan_name: &str,
+    event: &str,
+    content: &str,
+    time: &str,
+    backup_size: &str,
+) -> String {
     let mut output = String::with_capacity(template.len() + content.len());
     let mut rest = template;
     while let Some(open) = rest.find("{{") {
@@ -151,6 +265,8 @@ fn render_value(template: &str, plan_name: &str, event: &str, content: &str) -> 
             "plan_name" => output.push_str(plan_name),
             "event" => output.push_str(event),
             "content" => output.push_str(content),
+            "time" => output.push_str(time),
+            "backup_size" => output.push_str(backup_size),
             _ => output.push_str(&rest[open..open + close + 4]),
         }
         rest = &placeholder[close + 2..];
@@ -372,6 +488,7 @@ async fn run(spec: CommandSpec) -> anyhow::Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     command.stdin(Stdio::null());
+    command.kill_on_drop(true);
     let child = command.spawn().context("start curl")?;
     let output = child.wait_with_output().await?;
     if !output.status.success() {
@@ -497,6 +614,7 @@ mod tests {
         let template = rclone_backup_core::NotificationTemplate {
             id: "zh".into(),
             name: "中文".into(),
+            language: "zh".into(),
             start: rclone_backup_core::NotificationEventTemplate {
                 title: "{{plan_name}} 开始".into(),
                 body: "{{content}}".into(),
@@ -513,11 +631,42 @@ mod tests {
 
         assert_eq!(
             render_message("照片", "success", "完成", Some(&template)),
-            ("照片 成功：照片".into(), "事件 success\n完成".into())
+            ("照片 成功：照片".into(), "事件 成功\n完成".into())
         );
         assert_eq!(
             render_message("{{event}}", "success", "完成", Some(&template)).0,
             "{{event}} 成功：{{event}}"
+        );
+    }
+
+    #[test]
+    fn template_language_localizes_variables_and_renders_time_and_size() {
+        let message = rclone_backup_core::NotificationEventTemplate {
+            title: "{{event}} · {{time}}".into(),
+            body: "{{content}}\n{{backup_size}}".into(),
+        };
+        let template = rclone_backup_core::NotificationTemplate {
+            id: "zh-details".into(),
+            name: "中文详情".into(),
+            language: "zh".into(),
+            start: message.clone(),
+            success: message.clone(),
+            failure: message,
+        };
+        let variables = NotificationVariables {
+            content_default: "Backup completed at 2026-08-18 12:30:00 +00:00",
+            content_en: "Backup completed.",
+            content_zh: "备份已完成。",
+            time: "2026-08-18 12:30:00 +00:00",
+            backup_size_bytes: Some(1_572_864),
+        };
+
+        assert_eq!(
+            render_message_with_variables("照片", "success", variables, Some(&template)),
+            (
+                "成功 · 2026-08-18 12:30:00 +00:00".into(),
+                "备份已完成。\n1.50 MiB".into(),
+            )
         );
     }
 
@@ -530,6 +679,7 @@ mod tests {
         let template = rclone_backup_core::NotificationTemplate {
             id: "safe-title".into(),
             name: "Safe title".into(),
+            language: "en".into(),
             start: event.clone(),
             success: event.clone(),
             failure: event,
@@ -555,6 +705,7 @@ mod tests {
         let first = rclone_backup_core::NotificationTemplate {
             id: "first".into(),
             name: "First".into(),
+            language: "en".into(),
             start: message("A"),
             success: message("A"),
             failure: message("A"),
@@ -562,6 +713,7 @@ mod tests {
         let second = rclone_backup_core::NotificationTemplate {
             id: "second".into(),
             name: "Second".into(),
+            language: "en".into(),
             start: message("B"),
             success: message("B"),
             failure: message("B"),

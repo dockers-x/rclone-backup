@@ -1,12 +1,13 @@
 [package]
 name = "rclone-backup-runner"
-version = "2.1.0"
+version = "2.2.0"
 edition = "2024"
 license = "MIT"
 
 [dependencies]
 anyhow = "1.0"
 chrono = "0.4"
+chrono-tz = "0.10"
 rclone-backup-core = { path = "../core" }
 rclone-backup-notifications = { path = "../notifications" }
 rclone-backup-rclone = { path = "../rclone" }

@@ -1,10 +1,13 @@
 use anyhow::{Context, anyhow, bail};
-use chrono::Local;
+use chrono::{Local, Utc};
+use chrono_tz::Tz;
 use rclone_backup_core::*;
-use rclone_backup_rclone::{RcloneRc, command_cancellation_unconfirmed, command_timed_out};
+use rclone_backup_rclone::{
+    RcloneRc, command_cancellation_unconfirmed, command_cancelled, command_timed_out,
+};
 use rclone_backup_store::Store;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -13,9 +16,9 @@ use tokio::{
     fs,
     io::AsyncWriteExt,
     process::Command,
-    sync::Mutex,
+    sync::{Mutex, watch},
     task::JoinSet,
-    time::{Duration, sleep},
+    time::{Duration, Instant, sleep_until},
 };
 use tracing::warn;
 use uuid::Uuid;
@@ -23,6 +26,105 @@ use uuid::Uuid;
 const MAX_LOG_BYTES: usize = 512 * 1024;
 const REMOTE_CHECK_TIMEOUT: Duration = Duration::from_secs(25);
 const MANAGED_WORKSPACE_DIR: &str = ".runs";
+const RUN_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+
+#[derive(Clone)]
+struct ActiveRun {
+    run_id: String,
+    cancel: watch::Sender<bool>,
+}
+
+#[derive(Clone)]
+struct RunAttempt<'a> {
+    id: &'a str,
+    number: u32,
+    control: RunControl,
+}
+
+struct BackupAttemptResult {
+    result: anyhow::Result<()>,
+    deferred_cleanup: Option<PathBuf>,
+}
+
+#[derive(Clone)]
+struct RunControl {
+    cancellation: watch::Receiver<bool>,
+    deadline: Instant,
+}
+
+impl RunControl {
+    fn new(cancellation: watch::Receiver<bool>) -> Self {
+        Self::with_timeout(cancellation, RUN_TIMEOUT)
+    }
+
+    fn with_timeout(cancellation: watch::Receiver<bool>, duration: Duration) -> Self {
+        Self {
+            cancellation,
+            deadline: Instant::now() + duration,
+        }
+    }
+
+    fn ensure_running(&self) -> anyhow::Result<()> {
+        if *self.cancellation.borrow() {
+            return Err(RunCancelled.into());
+        }
+        if Instant::now() >= self.deadline {
+            return Err(RunTimedOut.into());
+        }
+        Ok(())
+    }
+
+    fn remaining(&self, maximum: Duration) -> anyhow::Result<Duration> {
+        self.ensure_running()?;
+        Ok(maximum.min(self.deadline.saturating_duration_since(Instant::now())))
+    }
+
+    async fn wait(&mut self, duration: Duration) -> anyhow::Result<()> {
+        self.ensure_running()?;
+        let delay = sleep_until((Instant::now() + duration).min(self.deadline));
+        tokio::pin!(delay);
+        tokio::select! {
+            () = &mut delay => {
+                if Instant::now() >= self.deadline {
+                    Err(RunTimedOut.into())
+                } else {
+                    Ok(())
+                }
+            }
+            () = wait_for_run_cancellation(&mut self.cancellation) => Err(RunCancelled.into()),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RunCancelled;
+
+impl std::fmt::Display for RunCancelled {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("backup run was cancelled")
+    }
+}
+
+impl std::error::Error for RunCancelled {}
+
+#[derive(Debug)]
+struct RunTimedOut;
+
+impl std::fmt::Display for RunTimedOut {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("backup run exceeded its 24-hour timeout")
+    }
+}
+
+impl std::error::Error for RunTimedOut {}
+
+fn run_cancelled(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<RunCancelled>().is_some() || command_cancelled(error)
+}
+
+fn run_timed_out(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<RunTimedOut>().is_some() || command_timed_out(error)
+}
 
 #[derive(Debug)]
 struct RcJobStateUncertain(String);
@@ -43,7 +145,7 @@ fn rc_job_state_uncertain(error: &anyhow::Error) -> bool {
 pub struct Runner {
     store: Store,
     work_dir: PathBuf,
-    active: Arc<Mutex<HashSet<Uuid>>>,
+    active: Arc<Mutex<HashMap<Uuid, ActiveRun>>>,
     rc: RcloneRc,
 }
 
@@ -52,7 +154,7 @@ impl Runner {
         Self {
             store,
             work_dir: work_dir.into(),
-            active: Arc::new(Mutex::new(HashSet::new())),
+            active: Arc::new(Mutex::new(HashMap::new())),
             rc,
         }
     }
@@ -75,7 +177,12 @@ impl Runner {
     }
 
     pub async fn is_active(&self, id: Uuid) -> bool {
-        self.active.lock().await.contains(&id)
+        self.active.lock().await.contains_key(&id)
+    }
+
+    pub async fn cancel_run(&self, run_id: &str) -> bool {
+        let active = self.active.lock().await;
+        request_cancellation(&active, run_id)
     }
 
     pub fn rclone_ready(&self) -> bool {
@@ -185,11 +292,18 @@ impl Runner {
         if let Some(target) = config.targets.iter().find(|target| target.id == target_id) {
             let test = target_test_config(&config, target);
             test.validate().map_err(anyhow::Error::msg)?;
-            let report = rclone_backup_notifications::deliver(
+            let time = Local::now().format("%Y-%m-%d %H:%M:%S %:z").to_string();
+            let report = rclone_backup_notifications::deliver_with_variables(
                 "Rclone Backup Test",
                 &test,
                 "success",
-                "Notification test from Rclone Backup",
+                rclone_backup_notifications::NotificationVariables {
+                    content_default: "Notification test from Rclone Backup",
+                    content_en: "Notification test from Rclone Backup",
+                    content_zh: "来自 Rclone Backup 的通知测试",
+                    time: &time,
+                    backup_size_bytes: Some(1_610_612_736),
+                },
             )
             .await;
             if report.failed {
@@ -234,8 +348,13 @@ impl Runner {
         send_notification(
             "Rclone Backup Test",
             &test,
-            event,
-            "Notification test from Rclone Backup",
+            None,
+            NotificationEvent {
+                name: event,
+                content_en: "Notification test from Rclone Backup",
+                content_zh: "来自 Rclone Backup 的通知测试",
+                backup_size_bytes: None,
+            },
             &mut log,
         )
         .await;
@@ -272,13 +391,20 @@ impl Runner {
         }
         {
             let mut active = self.active.lock().await;
-            if active.contains(&plan.id) {
+            if active.contains_key(&plan.id) {
                 bail!("plan is already running");
             }
             if max_active.is_some_and(|limit| active.len() >= limit) {
                 return Ok(None);
             }
-            active.insert(plan.id);
+            let (cancel, _) = watch::channel(false);
+            active.insert(
+                plan.id,
+                ActiveRun {
+                    run_id: String::new(),
+                    cancel,
+                },
+            );
         }
         let run = match self.store.start_run(&plan, trigger).await {
             Ok(run) => run,
@@ -287,9 +413,17 @@ impl Runner {
                 return Err(error);
             }
         };
+        let cancellation = {
+            let mut active = self.active.lock().await;
+            let control = active
+                .get_mut(&plan.id)
+                .expect("active run exists after its history record is created");
+            control.run_id.clone_from(&run.id);
+            control.cancel.subscribe()
+        };
         let run_id = run.id.clone();
         tokio::spawn(async move {
-            if let Err(error) = self.execute(plan, run).await {
+            if let Err(error) = self.execute(plan, run, cancellation).await {
                 warn!(%error, "backup run failed");
             }
         });
@@ -303,9 +437,17 @@ impl Runner {
         }
         {
             let mut active = self.active.lock().await;
-            if !active.insert(plan.id) {
+            if active.contains_key(&plan.id) {
                 bail!("plan is already running");
             }
+            let (cancel, _) = watch::channel(false);
+            active.insert(
+                plan.id,
+                ActiveRun {
+                    run_id: String::new(),
+                    cancel,
+                },
+            );
         }
         let run = match self.store.start_run(&plan, trigger).await {
             Ok(run) => run,
@@ -314,12 +456,27 @@ impl Runner {
                 return Err(error);
             }
         };
-        self.clone().execute(plan, run).await
+        let cancellation = {
+            let mut active = self.active.lock().await;
+            let control = active
+                .get_mut(&plan.id)
+                .expect("active run exists after its history record is created");
+            control.run_id.clone_from(&run.id);
+            control.cancel.subscribe()
+        };
+        self.clone().execute(plan, run, cancellation).await
     }
 
-    async fn execute(self, plan: Plan, run: RunRecord) -> anyhow::Result<()> {
+    async fn execute(
+        self,
+        plan: Plan,
+        run: RunRecord,
+        cancellation: watch::Receiver<bool>,
+    ) -> anyhow::Result<()> {
         let plan_id = plan.id;
-        let result = self.execute_inner(&plan, &run).await;
+        let result = self
+            .execute_inner(&plan, &run, RunControl::new(cancellation))
+            .await;
         self.active.lock().await.remove(&plan_id);
         result
     }
@@ -333,7 +490,12 @@ impl Runner {
         Ok(())
     }
 
-    async fn execute_inner(&self, plan: &Plan, run: &RunRecord) -> anyhow::Result<()> {
+    async fn execute_inner(
+        &self,
+        plan: &Plan,
+        run: &RunRecord,
+        mut control: RunControl,
+    ) -> anyhow::Result<()> {
         let notifications = match self.store.confirmed_notifications().await {
             Ok(config) => config.unwrap_or_default(),
             Err(error) => {
@@ -344,7 +506,14 @@ impl Runner {
         let mut log = LogBuffer::new(plan, &notifications);
         let mut result = Err(anyhow!("backup did not run"));
         let mut final_attempt = 1;
+        let mut backup_size_bytes = None;
+        let mut deferred_cleanup = None;
         for attempt in 1..=plan.retry.max_attempts {
+            backup_size_bytes = None;
+            if let Err(error) = control.ensure_running() {
+                result = Err(error);
+                break;
+            }
             final_attempt = attempt;
             log.line(format!("Attempt {attempt}/{}", plan.retry.max_attempts));
             for remote in &plan.remotes {
@@ -354,9 +523,26 @@ impl Runner {
             self.store
                 .update_run(&run.id, "running", attempt, &log.text, false)
                 .await?;
-            result = self
-                .backup_once(plan, &notifications, &run.id, attempt, &mut log)
+            let BackupAttemptResult {
+                result: attempt_result,
+                deferred_cleanup: cleanup,
+            } = self
+                .backup_once(
+                    plan,
+                    &notifications,
+                    RunAttempt {
+                        id: &run.id,
+                        number: attempt,
+                        control: control.clone(),
+                    },
+                    &mut backup_size_bytes,
+                    &mut log,
+                )
                 .await;
+            result = attempt_result;
+            if cleanup.is_some() {
+                deferred_cleanup = cleanup;
+            }
             if result.is_ok() {
                 break;
             }
@@ -365,6 +551,11 @@ impl Runner {
                 log.line(
                     "Rclone job state could not be confirmed. The workspace was preserved and new backups are blocked until the service restarts.",
                 );
+                break;
+            }
+            if result.as_ref().is_err_and(run_cancelled)
+                || result.as_ref().is_err_and(run_timed_out)
+            {
                 break;
             }
             if attempt < plan.retry.max_attempts {
@@ -376,21 +567,49 @@ impl Runner {
                 self.store
                     .update_run(&run.id, "retrying", attempt, &log.text, false)
                     .await?;
-                sleep(Duration::from_secs(delay)).await;
+                if let Err(error) = control.wait(Duration::from_secs(delay)).await {
+                    result = Err(error);
+                    break;
+                }
             }
         }
-        let status = if result.is_ok() { "success" } else { "failed" };
-        if let Err(error) = &result {
-            log.phase("failed");
+        let cancelled = result.as_ref().is_err_and(run_cancelled);
+        let timed_out = result.as_ref().is_err_and(run_timed_out);
+        let status = if result.is_ok() {
+            "success"
+        } else if cancelled {
+            "cancelled"
+        } else if timed_out {
+            "timed_out"
+        } else {
+            "failed"
+        };
+        if cancelled {
+            log.phase("cancelled");
+            log.line("Backup cancelled by user.");
+        } else if let Err(error) = &result {
+            log.phase(if timed_out { "timed_out" } else { "failed" });
             log.line(format!("Backup failed: {error:#}"));
-            notify(
+            if timed_out {
+                log.line("Failure notification skipped because the run deadline expired.");
+            } else if let Err(notification_error) = notify_with_control(
                 plan,
                 &notifications,
-                "failure",
-                &format!("Backup failed at {}. Reason: {error:#}", Local::now()),
+                NotificationEvent {
+                    name: "failure",
+                    content_en: &format!("Backup failed. Reason: {error:#}"),
+                    content_zh: &format!("备份失败。原因：{error:#}"),
+                    backup_size_bytes,
+                },
+                &mut control,
                 &mut log,
             )
-            .await;
+            .await
+            {
+                log.line(format!(
+                    "Failure notification stopped during finalization: {notification_error:#}"
+                ));
+            }
         } else {
             log.phase("completed");
             log.line(format!(
@@ -402,6 +621,11 @@ impl Runner {
         self.store
             .update_run(&run.id, status, final_attempt, &log.text, true)
             .await?;
+        if let Some(run_dir) = deferred_cleanup
+            && let Err(error) = fs::remove_dir_all(&run_dir).await
+        {
+            warn!(%error, path = %run_dir.display(), "cleanup cancelled backup workspace");
+        }
         result
     }
 
@@ -409,32 +633,50 @@ impl Runner {
         &self,
         plan: &Plan,
         notifications: &NotificationConfig,
-        run_id: &str,
-        attempt: u32,
+        run: RunAttempt<'_>,
+        backup_size_bytes: &mut Option<u64>,
         log: &mut LogBuffer,
-    ) -> anyhow::Result<()> {
+    ) -> BackupAttemptResult {
         let run_dir = self.work_dir.join(MANAGED_WORKSPACE_DIR).join(format!(
             "{}-{}",
             safe_name(&plan.name),
             Uuid::new_v4()
         ));
-        create_private_dir(&run_dir)
+        if let Err(error) = create_private_dir(&run_dir)
             .await
-            .context("create working directory")?;
+            .context("create working directory")
+        {
+            return BackupAttemptResult {
+                result: Err(error),
+                deferred_cleanup: None,
+            };
+        }
         let result = self
-            .backup_in_dir(plan, notifications, &run_dir, run_id, attempt, log)
+            .backup_in_dir(plan, notifications, &run_dir, run, backup_size_bytes, log)
             .await;
         if result.as_ref().is_err_and(rc_job_state_uncertain) {
             log.line(format!(
                 "Preserved workspace {} because rclone may still be reading it.",
                 run_dir.display()
             ));
-            return result;
+            return BackupAttemptResult {
+                result,
+                deferred_cleanup: None,
+            };
+        }
+        if result.as_ref().is_err_and(run_cancelled) || result.as_ref().is_err_and(run_timed_out) {
+            return BackupAttemptResult {
+                result,
+                deferred_cleanup: Some(run_dir),
+            };
         }
         if let Err(error) = fs::remove_dir_all(&run_dir).await {
             warn!(%error, "cleanup working directory");
         }
-        result
+        BackupAttemptResult {
+            result,
+            deferred_cleanup: None,
+        }
     }
 
     async fn backup_in_dir(
@@ -442,21 +684,30 @@ impl Runner {
         plan: &Plan,
         notifications: &NotificationConfig,
         run_dir: &Path,
-        run_id: &str,
-        attempt: u32,
+        mut run: RunAttempt<'_>,
+        backup_size_bytes: &mut Option<u64>,
         log: &mut LogBuffer,
     ) -> anyhow::Result<()> {
-        notify(
+        run.control.ensure_running()?;
+        notify_with_control(
             plan,
             notifications,
-            "start",
-            &format!("Start backup at {}", Local::now()),
+            NotificationEvent {
+                name: "start",
+                content_en: "Backup started.",
+                content_zh: "备份已开始。",
+                backup_size_bytes: None,
+            },
+            &mut run.control,
             log,
         )
-        .await;
+        .await?;
         self.ensure_workspace_outside_sources(plan, run_dir)?;
-        self.check_remotes(plan, run_id, attempt, log).await?;
-        let suffix = Local::now()
+        self.check_remotes(plan, run.id, run.number, run.control.clone(), log)
+            .await?;
+        run.control.ensure_running()?;
+        let suffix = Utc::now()
+            .with_timezone(&plan_timezone(plan))
             .format(&plan.archive.suffix)
             .to_string()
             .chars()
@@ -480,10 +731,10 @@ impl Runner {
         } else {
             "creating_archive"
         });
-        self.checkpoint(run_id, attempt, log).await?;
+        self.checkpoint(run.id, run.number, log).await?;
         let upload = match plan.archive.kind.as_str() {
             "none" => {
-                stage_sources(&available_sources, &staging, log).await?;
+                stage_sources(&available_sources, &staging, &mut run.control, log).await?;
                 staging.clone()
             }
             kind => {
@@ -512,17 +763,23 @@ impl Runner {
                         .arg(".")
                         .current_dir(&available_sources[0].path);
                 } else {
-                    stage_sources(&available_sources, &staging, log).await?;
+                    stage_sources(&available_sources, &staging, &mut run.control, log).await?;
                     command = command
                         .arg(target.as_os_str())
                         .arg(".")
                         .current_dir(&staging);
                 }
                 command = command.secret(&plan.archive.password);
-                run_command(command, log).await?;
+                run_command(command, &mut run.control, log).await?;
                 target
             }
         };
+        match backup_size(&upload, &mut run.control).await {
+            Ok(size) => *backup_size_bytes = Some(size),
+            Err(error) if run_cancelled(&error) || run_timed_out(&error) => return Err(error),
+            Err(error) => log.line(format!("Backup size is unavailable: {error:#}")),
+        }
+        run.control.ensure_running()?;
         if plan.archive.kind != "none"
             && fs::try_exists(&staging).await.unwrap_or(false)
             && let Err(error) = fs::remove_dir_all(&staging).await
@@ -533,7 +790,7 @@ impl Runner {
         for remote in &plan.remotes {
             log.target(remote, "pending", "");
         }
-        self.checkpoint(run_id, attempt, log).await?;
+        self.checkpoint(run.id, run.number, log).await?;
         let concurrency = plan.upload_concurrency.clamp(1, MAX_UPLOAD_CONCURRENCY);
         let upload_context = UploadContext {
             rc: self.rc.clone(),
@@ -541,12 +798,15 @@ impl Runner {
             archive_kind: plan.archive.kind.clone(),
             archive_base: archive_base.clone(),
             flags: plan.rclone_flags.clone(),
+            control: run.control.clone(),
         };
         let mut pending = plan.remotes.iter().cloned();
         let mut uploads = JoinSet::new();
         let mut upload_failures = Vec::new();
         let mut checkpoint_error = None;
         let mut uncertain_job = None;
+        let mut cancellation_error = None;
+        let mut timeout_error = None;
 
         while uploads.len() < concurrency && !self.rclone_quarantined() {
             let Some(remote) = pending.next() else { break };
@@ -554,7 +814,7 @@ impl Runner {
         }
         remember_first_error(
             &mut checkpoint_error,
-            self.checkpoint(run_id, attempt, log).await,
+            self.checkpoint(run.id, run.number, log).await,
         );
 
         while let Some(result) = uploads.join_next().await {
@@ -565,10 +825,27 @@ impl Runner {
                 }
                 Ok((remote, destination, Err(error))) => {
                     let detail = format!("{error:#}");
-                    log.target(&remote, "failed", &detail);
-                    log.line(format!("Upload to {destination} failed: {detail}"));
-                    upload_failures.push(remote.name);
-                    if command_cancellation_unconfirmed(&error) && uncertain_job.is_none() {
+                    let cancelled = run_cancelled(&error);
+                    let timed_out = run_timed_out(&error);
+                    let cancellation_unconfirmed = command_cancellation_unconfirmed(&error);
+                    if cancelled {
+                        log.target(&remote, "cancelled", &detail);
+                        log.line(format!("Upload to {destination} cancelled."));
+                        if cancellation_error.is_none() {
+                            cancellation_error = Some(error);
+                        }
+                    } else if timed_out {
+                        log.target(&remote, "timed_out", &detail);
+                        log.line(format!("Upload to {destination} timed out."));
+                        if timeout_error.is_none() {
+                            timeout_error = Some(error);
+                        }
+                    } else {
+                        log.target(&remote, "failed", &detail);
+                        log.line(format!("Upload to {destination} failed: {detail}"));
+                        upload_failures.push(remote.name);
+                    }
+                    if cancellation_unconfirmed && uncertain_job.is_none() {
                         self.rc.quarantine().await;
                         uncertain_job = Some(detail);
                     }
@@ -580,18 +857,20 @@ impl Runner {
             }
             remember_first_error(
                 &mut checkpoint_error,
-                self.checkpoint(run_id, attempt, log).await,
+                self.checkpoint(run.id, run.number, log).await,
             );
 
             if checkpoint_error.is_none()
                 && uncertain_job.is_none()
+                && cancellation_error.is_none()
+                && timeout_error.is_none()
                 && !self.rclone_quarantined()
                 && let Some(next) = pending.next()
             {
                 start_remote_upload(&mut uploads, next, upload_context.clone(), log);
                 remember_first_error(
                     &mut checkpoint_error,
-                    self.checkpoint(run_id, attempt, log).await,
+                    self.checkpoint(run.id, run.number, log).await,
                 );
             }
         }
@@ -611,6 +890,12 @@ impl Runner {
         if let Some(error) = checkpoint_error {
             return Err(error.context("persist upload progress after draining active jobs"));
         }
+        if let Some(error) = cancellation_error {
+            return Err(error);
+        }
+        if let Some(error) = timeout_error {
+            return Err(error);
+        }
         if !upload_failures.is_empty() {
             bail!(
                 "upload failed for {}/{} destinations: {}",
@@ -620,16 +905,23 @@ impl Runner {
             );
         }
         log.phase("retention");
-        self.checkpoint(run_id, attempt, log).await?;
-        self.apply_retention(plan, log).await?;
-        notify(
+        self.checkpoint(run.id, run.number, log).await?;
+        run.control.ensure_running()?;
+        self.apply_retention(plan, &mut run.control, log).await?;
+        run.control.ensure_running()?;
+        notify_with_control(
             plan,
             notifications,
-            "success",
-            &format!("Backup completed at {}", Local::now()),
+            NotificationEvent {
+                name: "success",
+                content_en: "Backup completed successfully.",
+                content_zh: "备份已成功完成。",
+                backup_size_bytes: *backup_size_bytes,
+            },
+            &mut run.control,
             log,
         )
-        .await;
+        .await?;
         Ok(())
     }
 
@@ -638,6 +930,7 @@ impl Runner {
         plan: &Plan,
         run_id: &str,
         attempt: u32,
+        control: RunControl,
         log: &mut LogBuffer,
     ) -> anyhow::Result<()> {
         let concurrency = plan
@@ -656,6 +949,7 @@ impl Runner {
                 remote,
                 self.rc.clone(),
                 plan.rclone_flags.clone(),
+                control.clone(),
                 log,
             );
         }
@@ -690,6 +984,11 @@ impl Runner {
                 &mut checkpoint_error,
                 self.checkpoint(run_id, attempt, log).await,
             );
+            if checkpoint_error.is_none()
+                && let Err(error) = control.ensure_running()
+            {
+                checkpoint_error = Some(error);
+            }
 
             if checkpoint_error.is_none()
                 && uncertain_job.is_none()
@@ -701,6 +1000,7 @@ impl Runner {
                     next,
                     self.rc.clone(),
                     plan.rclone_flags.clone(),
+                    control.clone(),
                     log,
                 );
                 remember_first_error(
@@ -725,6 +1025,7 @@ impl Runner {
         if let Some(error) = checkpoint_error {
             return Err(error.context("persist destination checks after draining active jobs"));
         }
+        control.ensure_running()?;
         if available == 0 {
             bail!("all rclone destinations are unavailable");
         }
@@ -737,10 +1038,16 @@ impl Runner {
             .await
     }
 
-    async fn apply_retention(&self, plan: &Plan, log: &mut LogBuffer) -> anyhow::Result<()> {
+    async fn apply_retention(
+        &self,
+        plan: &Plan,
+        control: &mut RunControl,
+        log: &mut LogBuffer,
+    ) -> anyhow::Result<()> {
         let archive_prefix = archive_prefix(plan);
         let include = format!("/{archive_prefix}*.{}", plan.archive.kind);
         for remote in &plan.remotes {
+            control.ensure_running()?;
             if self.rclone_quarantined() {
                 return Err(RcJobStateUncertain(
                     "rclone entered quarantine before retention completed".into(),
@@ -755,7 +1062,7 @@ impl Runner {
                 ));
                 if let Err(error) = self
                     .rc
-                    .run_command(
+                    .run_command_with_control(
                         "delete",
                         vec![
                             destination.clone(),
@@ -765,6 +1072,8 @@ impl Runner {
                             include.clone(),
                         ],
                         plan.rclone_flags.clone(),
+                        control.remaining(RUN_TIMEOUT)?,
+                        &mut control.cancellation,
                     )
                     .await
                 {
@@ -776,10 +1085,12 @@ impl Runner {
                 log.line(format!("rclone lsjson {destination} --files-only"));
                 match self
                     .rc
-                    .run_command_output(
+                    .run_command_output_with_control(
                         "lsjson",
                         vec![destination.clone(), "--files-only".into()],
                         plan.rclone_flags.clone(),
+                        control.remaining(RUN_TIMEOUT)?,
+                        &mut control.cancellation,
                     )
                     .await
                     .and_then(|out| {
@@ -792,6 +1103,7 @@ impl Runner {
                         });
                         items.sort_by(|a, b| b.mod_time.cmp(&a.mod_time));
                         for item in items.into_iter().skip(plan.retention.keep_count as usize) {
+                            control.ensure_running()?;
                             let path = format!(
                                 "{}/{}",
                                 destination.trim_end_matches('/'),
@@ -800,7 +1112,13 @@ impl Runner {
                             log.line(format!("rclone deletefile {path}"));
                             if let Err(error) = self
                                 .rc
-                                .run_command("deletefile", vec![path], plan.rclone_flags.clone())
+                                .run_command_with_control(
+                                    "deletefile",
+                                    vec![path],
+                                    plan.rclone_flags.clone(),
+                                    control.remaining(RUN_TIMEOUT)?,
+                                    &mut control.cancellation,
+                                )
                                 .await
                             {
                                 self.handle_retention_error("Count retention", error, log)
@@ -852,6 +1170,13 @@ impl Runner {
     }
 }
 
+fn request_cancellation(active: &HashMap<Uuid, ActiveRun>, run_id: &str) -> bool {
+    active
+        .values()
+        .find(|run| run.run_id == run_id)
+        .is_some_and(|run| run.cancel.send(true).is_ok())
+}
+
 fn target_test_config(
     config: &NotificationConfig,
     target: &rclone_backup_core::NotificationTarget,
@@ -898,8 +1223,10 @@ fn available_sources<'a>(plan: &'a Plan, log: &mut LogBuffer) -> Vec<&'a FolderS
 async fn stage_sources(
     sources: &[&FolderSource],
     staging: &Path,
+    control: &mut RunControl,
     log: &mut LogBuffer,
 ) -> anyhow::Result<()> {
+    control.ensure_running()?;
     fs::create_dir_all(staging).await?;
     if sources.len() == 1 {
         run_command(
@@ -907,11 +1234,13 @@ async fn stage_sources(
                 .args(["-a", "--"])
                 .arg(format!("{}/.", sources[0].path.trim_end_matches('/')))
                 .arg(staging.as_os_str()),
+            control,
             log,
         )
         .await?;
     } else {
         for source in sources {
+            control.ensure_running()?;
             let destination = staging.join(safe_name(&source.name));
             fs::create_dir_all(&destination).await?;
             run_command(
@@ -919,6 +1248,7 @@ async fn stage_sources(
                     .args(["-a", "--"])
                     .arg(format!("{}/.", source.path.trim_end_matches('/')))
                     .arg(destination.as_os_str()),
+                control,
                 log,
             )
             .await?;
@@ -944,6 +1274,7 @@ fn start_remote_check(
     remote: RemoteConfig,
     rc: RcloneRc,
     mut flags: Vec<String>,
+    control: RunControl,
     log: &mut LogBuffer,
 ) {
     let destination = remote_path(&remote);
@@ -956,12 +1287,19 @@ fn start_remote_check(
         "--low-level-retries=1".into(),
     ]);
     checks.spawn(async move {
+        let mut control = control;
         let check = rc
-            .run_command_with_timeout(
+            .run_command_with_control(
                 "lsd",
                 vec![destination.clone()],
                 flags.clone(),
-                REMOTE_CHECK_TIMEOUT,
+                match control.remaining(REMOTE_CHECK_TIMEOUT) {
+                    Ok(duration) => duration,
+                    Err(error) => {
+                        return (remote, false, false, format!("{error:#}"), false);
+                    }
+                },
+                &mut control.cancellation,
             )
             .await;
         match check {
@@ -975,11 +1313,17 @@ fn start_remote_check(
             }
             Err(check_error) => {
                 let create = rc
-                    .run_command_with_timeout(
+                    .run_command_with_control(
                         "mkdir",
                         vec![destination],
                         flags,
-                        REMOTE_CHECK_TIMEOUT,
+                        match control.remaining(REMOTE_CHECK_TIMEOUT) {
+                            Ok(duration) => duration,
+                            Err(error) => {
+                                return (remote, false, false, format!("{error:#}"), false);
+                            }
+                        },
+                        &mut control.cancellation,
                     )
                     .await;
                 match create {
@@ -1014,6 +1358,7 @@ struct UploadContext {
     archive_kind: String,
     archive_base: String,
     flags: Vec<String>,
+    control: RunControl,
 }
 
 fn start_remote_upload(
@@ -1034,12 +1379,19 @@ fn start_remote_upload(
     log.target(&remote, "uploading", "");
     log.line(format!("rclone copy {} {destination}", context.source));
     uploads.spawn(async move {
+        let mut control = context.control;
+        let duration = match control.remaining(RUN_TIMEOUT) {
+            Ok(duration) => duration,
+            Err(error) => return (remote, destination, Err(error)),
+        };
         let result = context
             .rc
-            .run_command(
+            .run_command_with_control(
                 "copy",
                 vec![context.source, destination.clone()],
                 context.flags,
+                duration,
+                &mut control.cancellation,
             )
             .await
             .map(|_| ())
@@ -1102,11 +1454,20 @@ impl CommandSpec {
     }
 }
 
-async fn run_command(spec: CommandSpec, log: &mut LogBuffer) -> anyhow::Result<()> {
-    capture_command(spec, log).await.map(|_| ())
+async fn run_command(
+    spec: CommandSpec,
+    control: &mut RunControl,
+    log: &mut LogBuffer,
+) -> anyhow::Result<()> {
+    capture_command(spec, control, log).await.map(|_| ())
 }
 
-async fn capture_command(spec: CommandSpec, log: &mut LogBuffer) -> anyhow::Result<String> {
+async fn capture_command(
+    spec: CommandSpec,
+    control: &mut RunControl,
+    log: &mut LogBuffer,
+) -> anyhow::Result<String> {
+    control.ensure_running()?;
     let rendered = redact(
         &format!("$ {} {}", spec.program, spec.args.join(" ")),
         &spec.secrets,
@@ -1123,6 +1484,7 @@ async fn capture_command(spec: CommandSpec, log: &mut LogBuffer) -> anyhow::Resu
         Stdio::null()
     });
     command.stdout(Stdio::piped());
+    command.kill_on_drop(true);
     if let Some(directory) = &spec.current_dir {
         command.current_dir(directory);
     }
@@ -1135,7 +1497,16 @@ async fn capture_command(spec: CommandSpec, log: &mut LogBuffer) -> anyhow::Resu
         stdin.write_all(input.as_bytes()).await?;
     }
     drop(child.stdin.take());
-    let output = child.wait_with_output().await?;
+    let deadline = control.deadline;
+    let output = tokio::select! {
+        output = child.wait_with_output() => output?,
+        () = wait_for_run_cancellation(&mut control.cancellation) => {
+            return Err(RunCancelled.into());
+        }
+        () = sleep_until(deadline) => {
+            return Err(RunTimedOut.into());
+        }
+    };
     let stdout = redact(&String::from_utf8_lossy(&output.stdout), &spec.secrets);
     let stderr = redact(&String::from_utf8_lossy(&output.stderr), &spec.secrets);
     if !stdout.trim().is_empty() {
@@ -1150,15 +1521,55 @@ async fn capture_command(spec: CommandSpec, log: &mut LogBuffer) -> anyhow::Resu
     Ok(stdout)
 }
 
+#[derive(Clone, Copy)]
+struct NotificationEvent<'a> {
+    name: &'a str,
+    content_en: &'a str,
+    content_zh: &'a str,
+    backup_size_bytes: Option<u64>,
+}
+
 async fn send_notification(
     plan_name: &str,
     notifications: &NotificationConfig,
-    event: &str,
-    content: &str,
+    timezone: Option<&str>,
+    event: NotificationEvent<'_>,
     log: &mut LogBuffer,
 ) {
-    let report =
-        rclone_backup_notifications::deliver(plan_name, notifications, event, content).await;
+    let time = if let Some(timezone) = timezone.and_then(|value| value.parse::<Tz>().ok()) {
+        Utc::now()
+            .with_timezone(&timezone)
+            .format("%Y-%m-%d %H:%M:%S %:z")
+            .to_string()
+    } else {
+        Local::now().format("%Y-%m-%d %H:%M:%S %:z").to_string()
+    };
+    let legacy_time = Local::now();
+    let content_default = match event.name {
+        "start" => format!("Start backup at {legacy_time}"),
+        "success" => format!("Backup completed at {legacy_time}"),
+        "failure" => format!(
+            "Backup failed at {legacy_time}. Reason: {}",
+            event
+                .content_en
+                .strip_prefix("Backup failed. Reason: ")
+                .unwrap_or(event.content_en)
+        ),
+        _ => event.content_en.to_owned(),
+    };
+    let report = rclone_backup_notifications::deliver_with_variables(
+        plan_name,
+        notifications,
+        event.name,
+        rclone_backup_notifications::NotificationVariables {
+            content_default: &content_default,
+            content_en: event.content_en,
+            content_zh: event.content_zh,
+            time: &time,
+            backup_size_bytes: event.backup_size_bytes,
+        },
+    )
+    .await;
     for message in report.messages {
         log.line(message);
     }
@@ -1167,11 +1578,77 @@ async fn send_notification(
 async fn notify(
     plan: &Plan,
     notifications: &NotificationConfig,
-    event: &str,
-    content: &str,
+    event: NotificationEvent<'_>,
     log: &mut LogBuffer,
 ) {
-    send_notification(&plan.name, notifications, event, content, log).await;
+    send_notification(&plan.name, notifications, Some(&plan.timezone), event, log).await;
+}
+
+async fn notify_with_control(
+    plan: &Plan,
+    notifications: &NotificationConfig,
+    event: NotificationEvent<'_>,
+    control: &mut RunControl,
+    log: &mut LogBuffer,
+) -> anyhow::Result<()> {
+    control.ensure_running()?;
+    tokio::select! {
+        () = notify(
+            plan,
+            notifications,
+            event,
+            log,
+        ) => Ok(()),
+        () = wait_for_run_cancellation(&mut control.cancellation) => Err(RunCancelled.into()),
+        () = sleep_until(control.deadline) => Err(RunTimedOut.into()),
+    }
+}
+
+fn plan_timezone(plan: &Plan) -> Tz {
+    plan.timezone.parse().unwrap_or(chrono_tz::UTC)
+}
+
+async fn backup_size(path: &Path, control: &mut RunControl) -> anyhow::Result<u64> {
+    let mut pending = vec![path.to_owned()];
+    let mut total = 0_u64;
+    while let Some(path) = pending.pop() {
+        let metadata = controlled_fs(control, fs::symlink_metadata(&path)).await?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_file() {
+            total = total.saturating_add(metadata.len());
+            continue;
+        }
+        let mut entries = controlled_fs(control, fs::read_dir(&path)).await?;
+        while let Some(entry) = controlled_fs(control, entries.next_entry()).await? {
+            pending.push(entry.path());
+        }
+    }
+    Ok(total)
+}
+
+async fn controlled_fs<T>(
+    control: &mut RunControl,
+    operation: impl std::future::Future<Output = std::io::Result<T>>,
+) -> anyhow::Result<T> {
+    control.ensure_running()?;
+    tokio::select! {
+        result = operation => Ok(result?),
+        () = wait_for_run_cancellation(&mut control.cancellation) => Err(RunCancelled.into()),
+        () = sleep_until(control.deadline) => Err(RunTimedOut.into()),
+    }
+}
+
+async fn wait_for_run_cancellation(cancellation: &mut watch::Receiver<bool>) {
+    loop {
+        if *cancellation.borrow() {
+            return;
+        }
+        if cancellation.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 fn safe_name(value: &str) -> String {
@@ -1358,6 +1835,53 @@ impl LogBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_run_can_be_cancelled_by_persistent_run_id() {
+        let plan_id = Uuid::new_v4();
+        let (cancel, mut cancellation) = watch::channel(false);
+        let active = HashMap::from([(
+            plan_id,
+            ActiveRun {
+                run_id: "run-123".into(),
+                cancel,
+            },
+        )]);
+
+        assert!(request_cancellation(&active, "run-123"));
+        assert!(*cancellation.borrow_and_update());
+        assert!(!request_cancellation(&active, "missing"));
+    }
+
+    #[tokio::test]
+    async fn run_control_interrupts_retry_waits_and_enforces_deadline() {
+        let (cancel, cancellation) = watch::channel(false);
+        let mut control = RunControl::with_timeout(cancellation, Duration::from_secs(60));
+        cancel.send(true).unwrap();
+        let error = control.wait(Duration::from_secs(60)).await.unwrap_err();
+        assert!(run_cancelled(&error));
+
+        let (_cancel, cancellation) = watch::channel(false);
+        let mut control = RunControl::with_timeout(cancellation, Duration::from_millis(1));
+        let error = control.wait(Duration::from_secs(60)).await.unwrap_err();
+        assert!(run_timed_out(&error));
+    }
+
+    #[tokio::test]
+    async fn backup_size_counts_nested_files() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("one"), [0_u8; 10]).unwrap();
+        std::fs::create_dir(directory.path().join("nested")).unwrap();
+        std::fs::write(directory.path().join("nested/two"), [0_u8; 7]).unwrap();
+
+        let (_cancel, cancellation) = watch::channel(false);
+        let mut control = RunControl::new(cancellation);
+        assert_eq!(
+            backup_size(directory.path(), &mut control).await.unwrap(),
+            17
+        );
+    }
+
     #[test]
     fn names_and_secrets_are_safe() {
         assert_eq!(safe_name("My Files / 1"), "my-files---1");
@@ -1391,6 +1915,7 @@ mod tests {
             templates: vec![rclone_backup_core::NotificationTemplate {
                 id: "custom".into(),
                 name: "Custom".into(),
+                language: "en".into(),
                 start: event.clone(),
                 success: event.clone(),
                 failure: event,
@@ -1567,7 +2092,11 @@ mod tests {
             secrets: vec![],
             targets: Default::default(),
         };
-        stage_sources(&refs, &staging, &mut log).await.unwrap();
+        let (_cancel, cancellation) = watch::channel(false);
+        let mut control = RunControl::new(cancellation);
+        stage_sources(&refs, &staging, &mut control, &mut log)
+            .await
+            .unwrap();
         assert_eq!(
             fs::read_to_string(staging.join("root.txt")).await.unwrap(),
             "root"
@@ -1607,7 +2136,11 @@ mod tests {
             secrets: vec![],
             targets: Default::default(),
         };
-        stage_sources(&refs, &staging, &mut log).await.unwrap();
+        let (_cancel, cancellation) = watch::channel(false);
+        let mut control = RunControl::new(cancellation);
+        stage_sources(&refs, &staging, &mut control, &mut log)
+            .await
+            .unwrap();
         assert_eq!(
             fs::read_to_string(staging.join("primary-data/a.txt"))
                 .await

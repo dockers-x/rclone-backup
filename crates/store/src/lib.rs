@@ -195,6 +195,16 @@ impl Store {
         Ok(run)
     }
 
+    pub async fn finish_incomplete_runs(&self) -> anyhow::Result<u64> {
+        let now = Utc::now().to_rfc3339();
+        let result = sqlx::query("UPDATE runs SET status='interrupted',finished_at=?,log=log || ? WHERE finished_at IS NULL AND status IN ('running','retrying')")
+            .bind(&now)
+            .bind(format!("[{now}] Backup interrupted because the service restarted.\n"))
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn update_run(
         &self,
         id: &str,
@@ -438,6 +448,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn startup_finishes_runs_left_active_by_a_previous_process() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::connect(
+            "sqlite::memory:",
+            directory.path().join("key").to_str().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO runs(id,plan_id,plan_name,trigger,status,attempt,started_at,log) VALUES('run-1','plan-1','Backup','schedule','running',1,?,'')")
+            .bind(Utc::now().to_rfc3339())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        assert_eq!(store.finish_incomplete_runs().await.unwrap(), 1);
+        let runs = store.list_runs(None, 10).await.unwrap();
+        assert_eq!(runs[0].status, "interrupted");
+        assert!(runs[0].finished_at.is_some());
+        assert!(runs[0].log.contains("service restarted"));
+        assert_eq!(store.finish_incomplete_runs().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn plan_documents_are_encrypted_at_rest() {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::connect(
@@ -521,6 +555,7 @@ mod tests {
                 templates: vec![rclone_backup_core::NotificationTemplate {
                     id: "zh-ops".into(),
                     name: "中文运维".into(),
+                    language: "zh".into(),
                     start: event.clone(),
                     success: event.clone(),
                     failure: event,

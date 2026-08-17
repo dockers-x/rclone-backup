@@ -43,12 +43,12 @@ const translations = {
     test: "测试", testSuccess: "连接测试成功", remoteDeleteConfirm: "确定删除这个存储账号吗？", remoteDeleted: "存储账号已删除", remoteEditHint: "仅显示当前使用的配置。敏感值不会回显，留空即可保持原值。", remoteUpdate: "编辑账号",
     runStatus: "运行状态", phase: "当前阶段", attemptLabel: "第 {current}/{total} 次尝试", targetProgress: "存储目标", showPassword: "显示密码", hidePassword: "隐藏密码",
     elapsed: "已运行 {time}", duration: "总用时 {time}", updatedAgo: "{time}前更新", targetElapsed: "用时 {time}", remoteCheckLiveHint: "状态来自后端实时记录；仅实际开始连接的目标显示为检查中，单次命令超过 25 秒会自动停止。", checkedTargets: "已处理 {done}/{total}",
-    pending: "等待中", checking: "检查连接", ready: "连接可用", uploading: "上传中", success: "成功", failed: "失败", unavailable: "不可用", running: "运行中", retrying: "等待重试",
+    pending: "等待中", checking: "检查连接", ready: "连接可用", uploading: "上传中", success: "成功", failed: "失败", unavailable: "不可用", running: "运行中", retrying: "等待重试", cancelled: "已取消", timed_out: "运行超时", interrupted: "服务重启后中断", cancelling: "正在取消…", cancelRun: "取消任务", cancelRequested: "已请求取消任务", uploadTimeoutHint: "整个备份任务最长运行 24 小时，超时后会自动停止。",
     checking_destinations: "检查存储目标", preparing_files: "准备文件", creating_archive: "创建归档", retention: "执行保留策略", completed: "备份完成",
     globalSettings: "全局设置", notConfigured: "未配置", configured: "已启用", globalNotificationHint: "所有手动与定时备份共用这一套通知配置。",
     pingHint: "向健康检查或 Webhook URL 报告备份事件", enablePing: "启用 Ping", completionUrl: "完成 URL（成功或失败）", startUrl: "开始 URL", successUrl: "成功 URL", failureUrl: "失败 URL",
     onStart: "开始", onSuccess: "成功", onFailure: "失败", smtpGlobalHint: "需填写 smtps:// 服务器和发件地址", enableSmtp: "启用 SMTP", enableServerChan: "启用 ServerChan",
-    sendTest: "发送测试", testingNotification: "正在发送…", notificationTestSuccess: "测试成功", saveNotifications: "保存通知配置", notificationSaved: "通知配置已保存", updatedAt: "更新于", addNotification: "添加目标", noNotificationTargets: "还没有通知目标", noNotificationTargetsHint: "添加 Ping、Email、Server酱或 ntfy；同一类型可以添加多个。", notificationName: "目标名称", notificationEvents: "通知事件", notificationTargets: "通知目标", notificationType: "通知类型", enableNotification: "启用通知目标", serverChanApp: "Server酱 App 推送", serverChanWechat: "Server酱微信推送", removeNotification: "删除目标", collapse: "收起", testFailed: "测试失败", notificationTemplates: "通知模板", messageLibrary: "消息内容库", templateLibraryHint: "集中维护通知内容，再由每个通知目标选择需要使用的模板。", createTemplate: "新建模板", builtInTemplate: "默认英文", builtInTemplateHint: "内置只读模板，兼容已有通知。", templateName: "模板名称", selectedTemplate: "使用模板", templateDefault: "默认英文", templateStart: "开始", templateSuccess: "成功", templateFailure: "失败", templateTitle: "通知标题", templateBody: "通知正文", templatePlaceholders: "可用变量", templatePreview: "实时预览", templateUsedBy: "{count} 个目标使用", templateUnused: "尚未使用", duplicateTemplate: "复制模板", deleteTemplate: "删除模板", saveTemplates: "保存模板", templateSaved: "通知模板已保存", templateDeleteBlocked: "请先为这些通知目标选择其他模板：{targets}", templateDeleteConfirm: "删除模板“{name}”？", customEvents: "已自定义 3 个事件", readOnly: "只读",
+    sendTest: "发送测试", testingNotification: "正在发送…", notificationTestSuccess: "测试成功", saveNotifications: "保存通知配置", notificationSaved: "通知配置已保存", updatedAt: "更新于", addNotification: "添加目标", noNotificationTargets: "还没有通知目标", noNotificationTargetsHint: "添加 Ping、Email、Server酱或 ntfy；同一类型可以添加多个。", notificationName: "目标名称", notificationEvents: "通知事件", notificationTargets: "通知目标", notificationType: "通知类型", enableNotification: "启用通知目标", serverChanApp: "Server酱 App 推送", serverChanWechat: "Server酱微信推送", removeNotification: "删除目标", collapse: "收起", testFailed: "测试失败", notificationTemplates: "通知模板", messageLibrary: "消息内容库", templateLibraryHint: "集中维护通知内容，再由每个通知目标选择需要使用的模板。", createTemplate: "新建模板", builtInTemplate: "默认英文", builtInTemplateHint: "内置只读模板，兼容已有通知。", templateName: "模板名称", templateLanguage: "模板语言", languageChinese: "中文", languageEnglish: "English", templateLanguageHint: "决定事件、运行详情和不可用值的显示语言，不会自动翻译你输入的标题或正文。", selectedTemplate: "使用模板", templateDefault: "默认英文", templateStart: "开始", templateSuccess: "成功", templateFailure: "失败", templateTitle: "通知标题", templateBody: "通知正文", templatePlaceholders: "可用变量", templatePreview: "实时预览", templateUsedBy: "{count} 个目标使用", templateUnused: "尚未使用", duplicateTemplate: "复制模板", deleteTemplate: "删除模板", saveTemplates: "保存模板", templateSaved: "通知模板已保存", templateDeleteBlocked: "请先为这些通知目标选择其他模板：{targets}", templateDeleteConfirm: "删除模板“{name}”？", templateDeleteDescription: "删除后无法恢复，使用该模板的通知目标必须先切换到其他模板。", confirmDeleteTemplate: "确认删除", contentVariableHint: "由备份程序生成的事件详情，不能在这里单独编辑；可通过修改标题和正文决定是否显示。", timeVariableHint: "事件发生时间", backupSizeVariableHint: "本次生成的归档或目录大小；开始和提前失败时显示暂不可用", customEvents: "已自定义 3 个事件", readOnly: "只读",
   },
   en: {
     skip: "Skip to main content", plans: "Backup plans", history: "Run history", serviceOnline: "Service online",
@@ -91,12 +91,12 @@ const translations = {
     test: "Test", testSuccess: "Connection test passed", remoteDeleteConfirm: "Delete this storage account?", remoteDeleted: "Storage account deleted", remoteEditHint: "Only settings used by this remote are shown. Secrets are never returned; leave them blank to keep the saved value.", remoteUpdate: "Edit account",
     runStatus: "Run status", phase: "Current stage", attemptLabel: "Attempt {current}/{total}", targetProgress: "Storage targets", showPassword: "Show password", hidePassword: "Hide password",
     elapsed: "Running for {time}", duration: "Duration {time}", updatedAgo: "Updated {time} ago", targetElapsed: "{time}", remoteCheckLiveHint: "Status comes from backend checkpoints. Only active connections show as checking, and each command is stopped after 25 seconds.", checkedTargets: "{done}/{total} processed",
-    pending: "Pending", checking: "Checking", ready: "Ready", uploading: "Uploading", success: "Succeeded", failed: "Failed", unavailable: "Unavailable", running: "Running", retrying: "Retrying",
+    pending: "Pending", checking: "Checking", ready: "Ready", uploading: "Uploading", success: "Succeeded", failed: "Failed", unavailable: "Unavailable", running: "Running", retrying: "Retrying", cancelled: "Cancelled", timed_out: "Timed out", interrupted: "Interrupted by service restart", cancelling: "Cancelling…", cancelRun: "Cancel run", cancelRequested: "Cancellation requested", uploadTimeoutHint: "The entire backup run is stopped automatically after 24 hours.",
     checking_destinations: "Checking destinations", preparing_files: "Preparing files", creating_archive: "Creating archive", retention: "Applying retention", completed: "Backup completed",
     globalSettings: "Global settings", notConfigured: "Not configured", configured: "Enabled", globalNotificationHint: "All manual and scheduled backups share this notification configuration.",
     pingHint: "Report backup events to health-check or webhook URLs", enablePing: "Enable Ping", completionUrl: "Completion URL (success or failure)", startUrl: "Start URL", successUrl: "Success URL", failureUrl: "Failure URL",
     onStart: "Start", onSuccess: "Success", onFailure: "Failure", smtpGlobalHint: "Requires an smtps:// server and sender address", enableSmtp: "Enable SMTP", enableServerChan: "Enable ServerChan",
-    sendTest: "Send test", testingNotification: "Sending…", notificationTestSuccess: "Test succeeded", saveNotifications: "Save notifications", notificationSaved: "Notification settings saved", updatedAt: "Updated", addNotification: "Add target", noNotificationTargets: "No notification targets", noNotificationTargetsHint: "Add Ping, Email, ServerChan, or ntfy. You can add more than one of each type.", notificationName: "Target name", notificationEvents: "Notification events", notificationTargets: "Notification targets", notificationType: "Notification type", enableNotification: "Enable notification target", serverChanApp: "ServerChan App Push", serverChanWechat: "ServerChan WeChat Push", removeNotification: "Delete target", collapse: "Collapse", testFailed: "Test failed", notificationTemplates: "Notification templates", messageLibrary: "Message library", templateLibraryHint: "Maintain message content once, then choose a template for each notification target.", createTemplate: "New template", builtInTemplate: "Default English", builtInTemplateHint: "Read-only built-in template for existing notifications.", templateName: "Template name", selectedTemplate: "Template", templateDefault: "Default English", templateStart: "Start", templateSuccess: "Success", templateFailure: "Failure", templateTitle: "Notification title", templateBody: "Notification body", templatePlaceholders: "Available variables", templatePreview: "Live preview", templateUsedBy: "Used by {count} targets", templateUnused: "Not in use", duplicateTemplate: "Duplicate template", deleteTemplate: "Delete template", saveTemplates: "Save templates", templateSaved: "Notification templates saved", templateDeleteBlocked: "Choose another template for these targets first: {targets}", templateDeleteConfirm: "Delete template “{name}”?", customEvents: "3 customized events", readOnly: "Read only",
+    sendTest: "Send test", testingNotification: "Sending…", notificationTestSuccess: "Test succeeded", saveNotifications: "Save notifications", notificationSaved: "Notification settings saved", updatedAt: "Updated", addNotification: "Add target", noNotificationTargets: "No notification targets", noNotificationTargetsHint: "Add Ping, Email, ServerChan, or ntfy. You can add more than one of each type.", notificationName: "Target name", notificationEvents: "Notification events", notificationTargets: "Notification targets", notificationType: "Notification type", enableNotification: "Enable notification target", serverChanApp: "ServerChan App Push", serverChanWechat: "ServerChan WeChat Push", removeNotification: "Delete target", collapse: "Collapse", testFailed: "Test failed", notificationTemplates: "Notification templates", messageLibrary: "Message library", templateLibraryHint: "Maintain message content once, then choose a template for each notification target.", createTemplate: "New template", builtInTemplate: "Default English", builtInTemplateHint: "Read-only built-in template for existing notifications.", templateName: "Template name", templateLanguage: "Template language", languageChinese: "中文", languageEnglish: "English", templateLanguageHint: "Controls the language of event, generated content, and unavailable values. Your own title and body text are not translated automatically.", selectedTemplate: "Template", templateDefault: "Default English", templateStart: "Start", templateSuccess: "Success", templateFailure: "Failure", templateTitle: "Notification title", templateBody: "Notification body", templatePlaceholders: "Available variables", templatePreview: "Live preview", templateUsedBy: "Used by {count} targets", templateUnused: "Not in use", duplicateTemplate: "Duplicate template", deleteTemplate: "Delete template", saveTemplates: "Save templates", templateSaved: "Notification templates saved", templateDeleteBlocked: "Choose another template for these targets first: {targets}", templateDeleteConfirm: "Delete template “{name}”?", templateDeleteDescription: "This cannot be undone. Notification targets using this template must switch first.", confirmDeleteTemplate: "Delete template", contentVariableHint: "Generated by the backup runner for the current event. It cannot be edited separately here; omit the variable if you do not want it shown.", timeVariableHint: "Time when the event occurred", backupSizeVariableHint: "Size of the generated archive or directory. Unavailable at start or after an early failure.", customEvents: "3 customized events", readOnly: "Read only",
   },
 };
 
@@ -313,10 +313,25 @@ function notificationDetail(target) {
 
 function builtInTemplate() {
   return {
-    id: "", name: t("builtInTemplate"), builtIn: true,
+    id: "", name: t("builtInTemplate"), language: "en", builtIn: true,
     start: { title: "{{plan_name}} Backup Start", body: "{{content}}" },
     success: { title: "{{plan_name}} Backup Success", body: "{{content}}" },
     failure: { title: "{{plan_name}} Backup Failed", body: "{{content}}" },
+  };
+}
+
+function defaultTemplate(language) {
+  if (language === "zh") {
+    return {
+      start: { title: "{{plan_name}} · 备份开始", body: "{{content}}\n时间：{{time}}" },
+      success: { title: "{{plan_name}} · 备份成功", body: "{{content}}\n时间：{{time}}\n备份大小：{{backup_size}}" },
+      failure: { title: "{{plan_name}} · 备份失败", body: "{{content}}\n时间：{{time}}\n备份大小：{{backup_size}}" },
+    };
+  }
+  return {
+    start: { title: "{{plan_name}} · Backup started", body: "{{content}}\nTime: {{time}}" },
+    success: { title: "{{plan_name}} · Backup succeeded", body: "{{content}}\nTime: {{time}}\nBackup size: {{backup_size}}" },
+    failure: { title: "{{plan_name}} · Backup failed", body: "{{content}}\nTime: {{time}}\nBackup size: {{backup_size}}" },
   };
 }
 
@@ -414,18 +429,30 @@ function renderTemplateEditor() {
   const readOnly = Boolean(template.builtIn);
   const tabs = ["start", "success", "failure"].map((name) => `<button type="button" role="tab" aria-selected="${event === name}" class="template-tab ${event === name ? "selected" : ""}" data-action="select-template-event" data-template-event="${name}">${escapeHtml(t(`template${name[0].toUpperCase()}${name.slice(1)}`))}</button>`).join("");
   $("#templateEditor").innerHTML = `<header class="template-editor-head"><div><span>${escapeHtml(readOnly ? t("builtInTemplateHint") : templateUsageText(template.id))}</span><h3>${escapeHtml(template.name)}</h3></div><div class="template-editor-tools"><button class="button ghost" type="button" data-action="duplicate-template">${escapeHtml(t("duplicateTemplate"))}</button>${readOnly ? "" : `<button class="button ghost danger-text" type="button" data-action="delete-template">${escapeHtml(t("deleteTemplate"))}</button>`}</div></header>
-    ${readOnly ? "" : `<label class="field template-name-field"><span>${escapeHtml(t("templateName"))}</span><input data-template-name maxlength="80" required value="${escapeHtml(template.name)}"></label>`}
+    ${readOnly ? "" : `<div class="template-metadata"><label class="field template-name-field"><span>${escapeHtml(t("templateName"))}</span><input data-template-name maxlength="80" required value="${escapeHtml(template.name)}"></label><label class="field"><span>${escapeHtml(t("templateLanguage"))}</span><select data-template-language><option value="zh" ${template.language === "zh" ? "selected" : ""}>${escapeHtml(t("languageChinese"))}</option><option value="en" ${template.language !== "zh" ? "selected" : ""}>${escapeHtml(t("languageEnglish"))}</option></select><small>${escapeHtml(t("templateLanguageHint"))}</small></label></div>`}
     <div class="template-tabs" role="tablist" aria-label="${escapeHtml(t("notificationEvents"))}">${tabs}</div>
     <div class="template-fields"><label class="field"><span>${escapeHtml(t("templateTitle"))}</span><input data-template-field="title" maxlength="200" required value="${escapeHtml(message.title)}" ${readOnly ? "readonly" : ""}></label><label class="field"><span>${escapeHtml(t("templateBody"))}</span><textarea data-template-field="body" maxlength="8000" required rows="8" ${readOnly ? "readonly" : ""}>${escapeHtml(message.body)}</textarea></label></div>
-    <div class="template-placeholders"><span>${escapeHtml(t("templatePlaceholders"))}</span><code>{{plan_name}}</code><code>{{event}}</code><code>{{content}}</code></div>
+    <div class="template-placeholders"><span>${escapeHtml(t("templatePlaceholders"))}</span><code>{{plan_name}}</code><code>{{event}}</code><code title="${escapeHtml(t("contentVariableHint"))}">{{content}}</code><code title="${escapeHtml(t("timeVariableHint"))}">{{time}}</code><code title="${escapeHtml(t("backupSizeVariableHint"))}">{{backup_size}}</code></div>
+    <div class="template-variable-notes"><p><code>{{content}}</code><span>${escapeHtml(t("contentVariableHint"))}</span></p><p><code>{{time}}</code><span>${escapeHtml(t("timeVariableHint"))}</span></p><p><code>{{backup_size}}</code><span>${escapeHtml(t("backupSizeVariableHint"))}</span></p></div>
     <section class="template-preview" aria-live="polite"><span>${escapeHtml(t("templatePreview"))}</span><strong id="templatePreviewTitle"></strong><pre id="templatePreviewBody"></pre></section>
     <footer class="template-save"><button class="button primary" type="submit" ${readOnly ? "hidden" : ""}>${escapeHtml(t("saveTemplates"))}</button></footer>`;
   renderTemplatePreview();
 }
 
-function renderTemplateValue(value, event) {
-  const values = { plan_name: "Rclone Backup Test", event, content: "Notification test from Rclone Backup" };
-  return value.replace(/\{\{(plan_name|event|content)\}\}/g, (_placeholder, key) => values[key]);
+function renderTemplateValue(value, event, language) {
+  const zh = language === "zh";
+  const events = zh ? { start: "开始", success: "成功", failure: "失败" } : { start: "start", success: "success", failure: "failure" };
+  const contents = zh
+    ? { start: "备份已开始。", success: "备份已成功完成。", failure: "备份失败。原因：连接超时" }
+    : { start: "Backup started.", success: "Backup completed successfully.", failure: "Backup failed. Reason: connection timed out" };
+  const values = {
+    plan_name: "Rclone Backup Test",
+    event: events[event],
+    content: contents[event],
+    time: "2026-08-18 12:30:00 +00:00",
+    backup_size: event === "success" ? "1.50 GiB" : (zh ? "暂不可用" : "Not available"),
+  };
+  return value.replace(/\{\{(plan_name|event|content|time|backup_size)\}\}/g, (_placeholder, key) => values[key]);
 }
 
 function renderTemplatePreview() {
@@ -434,8 +461,8 @@ function renderTemplatePreview() {
   const title = $("#templatePreviewTitle");
   const body = $("#templatePreviewBody");
   if (!title || !body) return;
-  title.textContent = renderTemplateValue(message.title, state.selectedTemplateEvent);
-  body.textContent = renderTemplateValue(message.body, state.selectedTemplateEvent);
+  title.textContent = renderTemplateValue(message.title, state.selectedTemplateEvent, template.language || "en");
+  body.textContent = renderTemplateValue(message.body, state.selectedTemplateEvent, template.language || "en");
 }
 
 async function saveTemplates(event) {
@@ -573,7 +600,7 @@ function updateRunTimers(root = document) {
 
 function targetIcon(status) {
   if (["success", "ready"].includes(status)) return "circle-check-big";
-  if (["failed", "unavailable"].includes(status)) return "circle-x";
+  if (["failed", "unavailable", "cancelled", "timed_out"].includes(status)) return "circle-x";
   if (status === "pending") return "circle-dashed";
   return "loader-circle";
 }
@@ -585,13 +612,15 @@ function renderOpenRun() {
   const progress = parseRunProgress(run);
   const plan = state.plans.find((item) => item.id === run.plan_id);
   const maxAttempts = plan?.retry?.max_attempts || Math.max(1, run.attempt);
-  const status = run.status === "success" ? "success" : run.status === "failed" ? "failed" : "running";
+  const active = ["running", "retrying"].includes(run.status);
+  const status = run.status === "success" ? "success" : active ? "running" : run.status;
   const targets = [...progress.targets.values()];
   const processed = targets.filter((item) => !["pending", "checking", "uploading"].includes(item.status)).length;
   const lastUpdated = progress.updatedAt || run.finished_at || run.started_at;
   const overview = $("#runOverview");
   const signature = JSON.stringify({ language: state.language, status, runStatus: run.status, attempt: run.attempt, maxAttempts, phase: progress.phase, targets });
-  if (overview.dataset.signature !== signature) overview.innerHTML = `<div class="run-summary ${status}"><span class="run-state-icon">${icon(status === "success" ? "circle-check-big" : status === "failed" ? "circle-x" : "loader-circle")}</span><div><small>${escapeHtml(t("runStatus"))}</small><strong>${escapeHtml(t(run.status))}</strong><span>${escapeHtml(t("attemptLabel").replace("{current}", run.attempt).replace("{total}", maxAttempts))}</span><span class="run-timing"><span data-duration-start="${escapeHtml(run.started_at)}" ${status === "running" ? "" : `data-duration-end="${escapeHtml(run.finished_at || lastUpdated)}"`} data-duration-key="${status === "running" ? "elapsed" : "duration"}"></span><i aria-hidden="true"></i><span data-relative-at="${escapeHtml(lastUpdated)}"></span></span></div><div class="run-phase" role="status"><small>${escapeHtml(t("phase"))}</small><strong>${escapeHtml(t(progress.phase))}</strong></div></div>
+  if (overview.dataset.signature !== signature) overview.innerHTML = `<div class="run-summary ${status}"><span class="run-state-icon">${icon(status === "success" ? "circle-check-big" : status === "running" ? "loader-circle" : "circle-x")}</span><div><small>${escapeHtml(t("runStatus"))}</small><strong>${escapeHtml(t(run.status))}</strong><span>${escapeHtml(t("attemptLabel").replace("{current}", run.attempt).replace("{total}", maxAttempts))}</span><span class="run-timing"><span data-duration-start="${escapeHtml(run.started_at)}" ${status === "running" ? "" : `data-duration-end="${escapeHtml(run.finished_at || lastUpdated)}"`} data-duration-key="${status === "running" ? "elapsed" : "duration"}"></span><i aria-hidden="true"></i><span data-relative-at="${escapeHtml(lastUpdated)}"></span></span></div><div class="run-phase" role="status"><small>${escapeHtml(t("phase"))}</small><strong>${escapeHtml(t(progress.phase))}</strong></div></div>
+    ${active ? `<div class="run-controls"><p>${escapeHtml(t("uploadTimeoutHint"))}</p><button class="button ghost danger-text" type="button" data-action="cancel-run" data-run-id="${escapeHtml(run.id)}">${escapeHtml(t("cancelRun"))}</button></div>` : ""}
     <div class="target-progress"><div class="target-progress-head"><h3>${escapeHtml(t("targetProgress"))}<span>${escapeHtml(t("checkedTargets").replace("{done}", processed).replace("{total}", targets.length))}</span></h3>${targets.length ? `<progress class="sui-progress" max="${targets.length}" value="${processed}" aria-label="${escapeHtml(t("targetProgress"))}">${processed}/${targets.length}</progress>` : ""}</div>${status === "running" && progress.phase === "checking_destinations" ? `<p class="sui-callout sui-info progress-note">${icon("info")}<span>${escapeHtml(t("remoteCheckLiveHint"))}</span></p>` : ""}${targets.length ? `<div class="target-list">${targets.map((target) => `<article class="target-status ${escapeHtml(target.status)}"><span class="target-icon">${icon(targetIcon(target.status))}</span><div><strong>${escapeHtml(target.name)}</strong><small>${escapeHtml(target.directory || "")}${target.detail ? ` · ${escapeHtml(target.detail)}` : ""}</small></div><span class="target-state"><b>${escapeHtml(t(target.status))}</b>${target.startedAt ? `<small data-duration-start="${escapeHtml(target.startedAt)}" ${!["checking", "uploading"].includes(target.status) && target.at ? `data-duration-end="${escapeHtml(target.at)}"` : ""}></small>` : ""}</span></article>`).join("")}</div>` : `<p class="target-empty">${escapeHtml(t("checking_destinations"))}</p>`}</div>`;
   overview.dataset.signature = signature;
   applyFrameworkComponents(overview);
@@ -1281,6 +1310,19 @@ document.addEventListener("click", async (event) => {
     const run = state.runs.find((item) => item.id === button.closest(".history-row").dataset.run);
     state.openRunId = run?.id || null; $("#logDialog").showModal(); renderOpenRun();
   }
+  if (action === "cancel-run") {
+    button.disabled = true;
+    button.textContent = t("cancelling");
+    try {
+      await api(`/api/runs/${encodeURIComponent(button.dataset.runId)}/cancel`, { method: "POST" });
+      toast(t("cancelRequested"));
+      await loadAll();
+    } catch (error) {
+      toast(error.message, true);
+      button.disabled = false;
+      button.textContent = t("cancelRun");
+    }
+  }
   if (action === "toggle-password") {
     const input = button.closest(".password-field").querySelector("input");
     if (!input.value && input.dataset.passwordSet === "true") {
@@ -1321,10 +1363,12 @@ document.addEventListener("click", async (event) => {
   if (action === "add-template") {
     if (state.notificationTemplates.length >= 32) return;
     const id = crypto.randomUUID();
-    const source = builtInTemplate();
+    const language = state.language === "zh" ? "zh" : "en";
+    const source = defaultTemplate(language);
     state.notificationTemplates.push({
       id,
       name: state.language === "zh" ? `通知模板 ${state.notificationTemplates.length + 1}` : `Notification template ${state.notificationTemplates.length + 1}`,
+      language,
       start: structuredClone(source.start),
       success: structuredClone(source.success),
       failure: structuredClone(source.failure),
@@ -1340,6 +1384,7 @@ document.addEventListener("click", async (event) => {
     state.notificationTemplates.push({
       id,
       name: duplicateTemplateName(source.name),
+      language: source.language || "en",
       start: structuredClone(source.start),
       success: structuredClone(source.success),
       failure: structuredClone(source.failure),
@@ -1357,12 +1402,20 @@ document.addEventListener("click", async (event) => {
       $("#templateError").hidden = false;
       return;
     }
-    if (confirm(t("templateDeleteConfirm").replace("{name}", template.name))) {
-      state.notificationTemplates = state.notificationTemplates.filter((item) => item.id !== template.id);
-      state.selectedTemplateId = "";
-      $("#templateError").hidden = true;
-      renderTemplates();
-    }
+    const dialog = $("#templateDeleteDialog");
+    dialog.dataset.templateId = template.id;
+    $("#templateDeleteDialogTitle").textContent = t("templateDeleteConfirm").replace("{name}", template.name);
+    dialog.showModal();
+  }
+  if (action === "confirm-delete-template") {
+    const dialog = $("#templateDeleteDialog");
+    const templateId = dialog.dataset.templateId;
+    state.notificationTemplates = state.notificationTemplates.filter((item) => item.id !== templateId);
+    if (state.selectedTemplateId === templateId) state.selectedTemplateId = "";
+    $("#templateError").hidden = true;
+    dialog.close();
+    delete dialog.dataset.templateId;
+    renderTemplates();
   }
   if (action === "add-notification") {
     if (state.notificationTargets.length >= 32) return;
@@ -1468,16 +1521,19 @@ function syncNotificationField(event) {
 }
 $("#notificationForm").addEventListener("input", syncNotificationField);
 $("#notificationForm").addEventListener("change", syncNotificationField);
-$("#templateForm").addEventListener("input", (event) => {
+function syncTemplateField(event) {
   const template = templateById(state.selectedTemplateId);
   if (!template || template.builtIn) return;
   if (event.target.matches("[data-template-name]")) {
     template.name = event.target.value;
     renderTemplateList();
   }
+  if (event.target.matches("[data-template-language]")) template.language = event.target.value;
   if (event.target.matches("[data-template-field]")) template[state.selectedTemplateEvent][event.target.dataset.templateField] = event.target.value;
   renderTemplatePreview();
-});
+}
+$("#templateForm").addEventListener("input", syncTemplateField);
+$("#templateForm").addEventListener("change", syncTemplateField);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && document.body.classList.contains("menu-open")) { setMenuOpen(false); $("#menuButton").focus(); }
 });

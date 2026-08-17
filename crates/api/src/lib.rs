@@ -82,6 +82,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/notifications/test", post(test_notification))
         .route("/api/runs", get(list_runs))
+        .route("/api/runs/{id}/cancel", post(cancel_run))
         .fallback(not_found)
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
     Router::new()
@@ -518,7 +519,8 @@ async fn openapi() -> impl IntoResponse {
             },
             "/api/notification-templates": { "put": { "summary": "Save the reusable notification template library", "responses": { "200": { "description": "Saved" }, "422": { "description": "Validation or reference error" }}}},
             "/api/notifications/test": { "post": { "summary": "Send a channel test using global notification settings", "responses": { "200": { "description": "Delivered" }, "422": { "description": "Validation or delivery error" }}}},
-            "/api/runs": { "get": { "summary": "List persistent run history", "responses": { "200": { "description": "Runs" }}}}
+            "/api/runs": { "get": { "summary": "List persistent run history", "responses": { "200": { "description": "Runs" }}}},
+            "/api/runs/{id}/cancel": { "post": { "summary": "Cancel an active backup run", "responses": { "202": { "description": "Cancellation requested" }, "404": { "description": "Run is not active" }}}}
         }
     }))
 }
@@ -649,6 +651,17 @@ async fn list_runs(
             .list_runs(query.plan_id, query.limit.unwrap_or(50))
             .await?,
     ))
+}
+
+async fn cancel_run(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    if state.runner.cancel_run(&id).await {
+        Ok(StatusCode::ACCEPTED)
+    } else {
+        Err(ApiError::not_found())
+    }
 }
 
 #[derive(Deserialize)]
@@ -1176,6 +1189,7 @@ mod tests {
         let template = NotificationTemplate {
             id: "custom".into(),
             name: "Custom".into(),
+            language: "en".into(),
             start: event.clone(),
             success: event.clone(),
             failure: event,
@@ -1215,6 +1229,7 @@ mod tests {
         let stored_template = NotificationTemplate {
             id: "stored".into(),
             name: "Stored".into(),
+            language: "en".into(),
             start: event.clone(),
             success: event.clone(),
             failure: event.clone(),
@@ -1222,6 +1237,7 @@ mod tests {
         let stale_template = NotificationTemplate {
             id: "stale".into(),
             name: "Stale".into(),
+            language: "en".into(),
             start: event.clone(),
             success: event.clone(),
             failure: event,

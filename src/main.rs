@@ -73,12 +73,19 @@ async fn prepare(config: &AppConfig) -> anyhow::Result<(Store, Runner)> {
 }
 
 async fn serve(config: AppConfig) -> anyhow::Result<()> {
-    let (store, runner) = prepare(&config).await?;
-    spawn_readiness_probe(runner.clone());
-    spawn_scheduler(store.clone(), runner.clone());
     let listener = TcpListener::bind(&config.address)
         .await
         .with_context(|| format!("bind {}", config.address))?;
+    let (store, runner) = prepare(&config).await?;
+    let interrupted = store.finish_incomplete_runs().await?;
+    if interrupted > 0 {
+        warn!(
+            runs = interrupted,
+            "marked incomplete backup runs as interrupted"
+        );
+    }
+    spawn_readiness_probe(runner.clone());
+    spawn_scheduler(store.clone(), runner.clone());
     info!(address = %config.address, version = env!("CARGO_PKG_VERSION"), "Web UI ready");
     if config.public_auth.is_none() {
         warn!(

@@ -11,7 +11,7 @@ use std::{
 };
 use tokio::{
     process::{Child, Command},
-    sync::{Mutex, RwLock},
+    sync::{Mutex, RwLock, watch},
     time::{Instant, sleep, timeout, timeout_at},
 };
 
@@ -21,6 +21,24 @@ struct CommandTimeout {
     duration: Duration,
     cancellation_error: Option<String>,
 }
+
+#[derive(Debug)]
+struct CommandCancelled {
+    command: String,
+    cancellation_error: Option<String>,
+}
+
+impl std::fmt::Display for CommandCancelled {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "rclone {} was cancelled", self.command)?;
+        if let Some(error) = &self.cancellation_error {
+            write!(formatter, "; cancellation could not be confirmed: {error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for CommandCancelled {}
 
 impl std::fmt::Display for CommandTimeout {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -67,10 +85,17 @@ pub fn command_timed_out(error: &anyhow::Error) -> bool {
     error.downcast_ref::<CommandTimeout>().is_some()
 }
 
+pub fn command_cancelled(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<CommandCancelled>().is_some()
+}
+
 pub fn command_cancellation_unconfirmed(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<CommandTimeout>()
         .is_some_and(|error| error.cancellation_error.is_some())
+        || error
+            .downcast_ref::<CommandCancelled>()
+            .is_some_and(|error| error.cancellation_error.is_some())
         || error.downcast_ref::<CommandStateUncertain>().is_some()
 }
 
@@ -238,6 +263,68 @@ impl RcloneRc {
         }
     }
 
+    pub async fn run_command_with_control(
+        &self,
+        command: &str,
+        args: Vec<String>,
+        options: Vec<String>,
+        duration: Duration,
+        cancellation: &mut watch::Receiver<bool>,
+    ) -> anyhow::Result<Value> {
+        if *cancellation.borrow() {
+            return Err(CommandCancelled {
+                command: command.to_owned(),
+                cancellation_error: None,
+            }
+            .into());
+        }
+        let deadline = Instant::now() + duration;
+        let jobid = tokio::select! {
+            started = timeout_at(deadline, self.start_command(command, args, options)) => match started {
+                Ok(Ok(jobid)) => jobid,
+                Ok(Err(error)) => {
+                    self.quarantine().await;
+                    return Err(command_submission_uncertain(command, error));
+                }
+                Err(_) => {
+                    self.quarantine().await;
+                    return Err(command_timeout_error(command, duration, Some("job submission did not return a job id".into())));
+                }
+            },
+            () = wait_for_cancellation(cancellation) => {
+                self.quarantine().await;
+                return Err(CommandCancelled {
+                    command: command.to_owned(),
+                    cancellation_error: Some(
+                        "job submission was interrupted before rclone returned a job id".into(),
+                    ),
+                }
+                .into());
+            }
+        };
+        tokio::select! {
+            waited = timeout_at(deadline, self.wait_for_job(jobid)) => match waited {
+                Ok(Ok(status)) => Ok(status),
+                Ok(Err(WaitFailure::Terminal(error))) => Err(error),
+                Ok(Err(WaitFailure::Monitor(error))) => self.monitor_failure(command, jobid, error).await,
+                Err(_) => {
+                    let cancellation_error = self.cancel_job(jobid).await;
+                    if cancellation_error.is_some() {
+                        self.quarantine().await;
+                    }
+                    Err(command_timeout_error(command, duration, cancellation_error))
+                }
+            },
+            () = wait_for_cancellation(cancellation) => {
+                let cancellation_error = self.cancel_job(jobid).await;
+                if cancellation_error.is_some() {
+                    self.quarantine().await;
+                }
+                Err(CommandCancelled { command: command.to_owned(), cancellation_error }.into())
+            }
+        }
+    }
+
     async fn monitor_failure(
         &self,
         command: &str,
@@ -341,6 +428,25 @@ impl RcloneRc {
         options: Vec<String>,
     ) -> anyhow::Result<String> {
         let status = self.run_command(command, args, options).await?;
+        Ok(status
+            .pointer("/output/result")
+            .or_else(|| status.get("output"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned())
+    }
+
+    pub async fn run_command_output_with_control(
+        &self,
+        command: &str,
+        args: Vec<String>,
+        options: Vec<String>,
+        duration: Duration,
+        cancellation: &mut watch::Receiver<bool>,
+    ) -> anyhow::Result<String> {
+        let status = self
+            .run_command_with_control(command, args, options, duration, cancellation)
+            .await?;
         Ok(status
             .pointer("/output/result")
             .or_else(|| status.get("output"))
@@ -490,6 +596,17 @@ impl RcloneRc {
     }
 }
 
+async fn wait_for_cancellation(cancellation: &mut watch::Receiver<bool>) {
+    loop {
+        if *cancellation.borrow() {
+            return;
+        }
+        if cancellation.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
 fn random_secret(length: usize) -> String {
     rand::rng()
         .sample_iter(&Alphanumeric)
@@ -620,9 +737,9 @@ fn parameter_has_value(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandStateUncertain, command_cancellation_unconfirmed, command_output_error,
-        command_submission_uncertain, command_timed_out, command_timeout_error,
-        provider_secret_fields, public_remote_parameters, rclone_version,
+        CommandCancelled, CommandStateUncertain, command_cancellation_unconfirmed,
+        command_cancelled, command_output_error, command_submission_uncertain, command_timed_out,
+        command_timeout_error, provider_secret_fields, public_remote_parameters, rclone_version,
     };
     use serde_json::json;
     use std::time::Duration;
@@ -753,6 +870,25 @@ mod tests {
                 .to_string()
                 .contains("cancellation could not be confirmed")
         );
+    }
+
+    #[test]
+    fn cancelled_commands_are_distinguishable_and_report_uncertain_stops() {
+        let confirmed: anyhow::Error = CommandCancelled {
+            command: "copy".into(),
+            cancellation_error: None,
+        }
+        .into();
+        assert!(command_cancelled(&confirmed));
+        assert!(!command_cancellation_unconfirmed(&confirmed));
+
+        let uncertain: anyhow::Error = CommandCancelled {
+            command: "copy".into(),
+            cancellation_error: Some("job/stop failed".into()),
+        }
+        .into();
+        assert!(command_cancelled(&uncertain));
+        assert!(command_cancellation_unconfirmed(&uncertain));
     }
 
     #[test]
