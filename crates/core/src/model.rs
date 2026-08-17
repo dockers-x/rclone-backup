@@ -223,7 +223,7 @@ fn validate_label(value: &str, field: &str) -> Result<(), String> {
     if trimmed.is_empty()
         || matches!(trimmed, "." | "..")
         || trimmed.chars().count() > 80
-        || trimmed.contains(['/', ':', '\0', '\n'])
+        || trimmed.contains(['/', ':', '\0', '\r', '\n'])
     {
         return Err(format!("{field} is invalid"));
     }
@@ -332,6 +332,8 @@ impl RetryPolicy {
 pub struct NotificationConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<NotificationTarget>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub templates: Vec<NotificationTemplate>,
     #[serde(default, skip_serializing_if = "ping_is_default")]
     pub ping: PingConfig,
     #[serde(default, skip_serializing_if = "mail_is_default")]
@@ -343,6 +345,7 @@ pub struct NotificationConfig {
 impl NotificationConfig {
     pub fn is_empty(&self) -> bool {
         self.targets.is_empty()
+            && self.templates.is_empty()
             && !self.ping.has_endpoint()
             && !self.mail.enabled
             && self.mail.to.trim().is_empty()
@@ -355,17 +358,53 @@ impl NotificationConfig {
         if self.targets.len() > 32 {
             return Err("at most 32 notification targets are allowed".into());
         }
+        self.validate_templates()?;
         let mut ids = std::collections::HashSet::new();
         for target in &self.targets {
             target.validate()?;
             if !ids.insert(target.id.as_str()) {
                 return Err("notification target IDs must be unique".into());
             }
+            self.template_for(&target.template_id)?;
         }
         self.ping.validate()?;
         self.validate_mail()?;
         self.validate_serverchan()?;
         Ok(())
+    }
+
+    fn validate_templates(&self) -> Result<(), String> {
+        if self.templates.len() > 32 {
+            return Err("at most 32 notification templates are allowed".into());
+        }
+        if self
+            .templates
+            .iter()
+            .map(NotificationTemplate::encoded_size)
+            .sum::<usize>()
+            > 64 * 1024
+        {
+            return Err("notification template library is too large".into());
+        }
+        let mut ids = std::collections::HashSet::new();
+        for template in &self.templates {
+            template.validate()?;
+            if !ids.insert(template.id.as_str()) {
+                return Err("notification template IDs must be unique".into());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn template_for(&self, id: &str) -> Result<Option<&NotificationTemplate>, String> {
+        if id.is_empty() {
+            return Ok(None);
+        }
+        self.templates
+            .iter()
+            .find(|template| template.id == id)
+            .map(Some)
+            .ok_or_else(|| "notification target template does not exist".into())
     }
 
     fn validate_mail(&self) -> Result<(), String> {
@@ -467,6 +506,7 @@ impl NotificationConfig {
             self.targets.push(NotificationTarget {
                 id: "legacy-ping".into(),
                 name: "Ping".into(),
+                template_id: String::new(),
                 enabled: self.ping.enabled,
                 on_start: self.ping.on_start,
                 on_success: self.ping.on_success,
@@ -489,6 +529,7 @@ impl NotificationConfig {
             self.targets.push(NotificationTarget {
                 id: "legacy-mail".into(),
                 name: "Email".into(),
+                template_id: String::new(),
                 enabled: self.mail.enabled,
                 on_start: self.mail.on_start,
                 on_success: self.mail.on_success,
@@ -507,6 +548,7 @@ impl NotificationConfig {
             self.targets.push(NotificationTarget {
                 id: "legacy-serverchan".into(),
                 name: name.into(),
+                template_id: String::new(),
                 enabled: self.serverchan.enabled,
                 on_start: self.serverchan.on_start,
                 on_success: self.serverchan.on_success,
@@ -636,6 +678,8 @@ fn serverchan_is_default(value: &ServerChanConfig) -> bool {
 pub struct NotificationTarget {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub template_id: String,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -646,6 +690,100 @@ pub struct NotificationTarget {
     pub on_failure: bool,
     #[serde(flatten)]
     pub kind: NotificationTargetKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NotificationTemplate {
+    pub id: String,
+    pub name: String,
+    pub start: NotificationEventTemplate,
+    pub success: NotificationEventTemplate,
+    pub failure: NotificationEventTemplate,
+}
+
+impl NotificationTemplate {
+    fn validate(&self) -> Result<(), String> {
+        if self.id.is_empty()
+            || self.id.chars().count() > 80
+            || !self.id.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+            })
+        {
+            return Err("notification template ID is invalid".into());
+        }
+        validate_label(&self.name, "notification template name")?;
+        self.start.validate()?;
+        self.success.validate()?;
+        self.failure.validate()?;
+        Ok(())
+    }
+
+    fn encoded_size(&self) -> usize {
+        self.id.len()
+            + self.name.len()
+            + self.start.encoded_size()
+            + self.success.encoded_size()
+            + self.failure.encoded_size()
+    }
+
+    pub fn event(&self, event: &str) -> &NotificationEventTemplate {
+        match event {
+            "start" => &self.start,
+            "success" => &self.success,
+            _ => &self.failure,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct NotificationEventTemplate {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+}
+
+impl NotificationEventTemplate {
+    fn validate(&self) -> Result<(), String> {
+        if self.title.is_empty()
+            || self.title.chars().count() > 200
+            || self.title.contains(['\0', '\r', '\n'])
+        {
+            return Err("notification template title is invalid".into());
+        }
+        if self.body.is_empty() || self.body.chars().count() > 8_000 || self.body.contains('\0') {
+            return Err("notification template body is invalid".into());
+        }
+        validate_template_placeholders(&self.title)?;
+        validate_template_placeholders(&self.body)
+    }
+
+    fn encoded_size(&self) -> usize {
+        self.title.len() + self.body.len()
+    }
+}
+
+fn validate_template_placeholders(value: &str) -> Result<(), String> {
+    let mut rest = value;
+    loop {
+        let Some(open) = rest.find("{{") else {
+            if rest.contains("}}") {
+                return Err("notification template contains a malformed placeholder".into());
+            }
+            return Ok(());
+        };
+        if rest[..open].contains("}}") {
+            return Err("notification template contains a malformed placeholder".into());
+        }
+        rest = &rest[open + 2..];
+        let Some(close) = rest.find("}}") else {
+            return Err("notification template contains a malformed placeholder".into());
+        };
+        if !matches!(&rest[..close], "plan_name" | "event" | "content") {
+            return Err("notification template contains an unknown placeholder".into());
+        }
+        rest = &rest[close + 2..];
+    }
 }
 
 impl NotificationTarget {
@@ -786,6 +924,7 @@ impl NotificationTargetKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
 pub struct PingTargetConfig {
     pub completion_url: String,
     pub completion_options: Vec<String>,
@@ -1645,6 +1784,7 @@ mod tests {
         let target = NotificationTarget {
             id: "mail-home".into(),
             name: "家庭邮箱".into(),
+            template_id: String::new(),
             enabled: true,
             on_start: false,
             on_success: true,
@@ -1667,11 +1807,193 @@ mod tests {
     }
 
     #[test]
+    fn notification_template_defaults_for_existing_documents() {
+        let config: NotificationConfig = serde_json::from_value(serde_json::json!({
+            "targets": [{
+                "id": "ntfy-home",
+                "name": "ntfy",
+                "enabled": true,
+                "on_success": true,
+                "type": "ntfy",
+                "config": {
+                    "server": "https://ntfy.sh",
+                    "topic": "backup",
+                    "token": ""
+                }
+            }]
+        }))
+        .unwrap();
+
+        assert!(config.templates.is_empty());
+        assert!(config.targets[0].template_id.is_empty());
+        assert_eq!(config.template_for(""), Ok(None));
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn notification_template_references_must_resolve() {
+        let mut config = NotificationConfig {
+            templates: vec![NotificationTemplate {
+                id: "chinese".into(),
+                name: "中文通知".into(),
+                start: NotificationEventTemplate {
+                    title: "{{plan_name}} 开始".into(),
+                    body: "{{content}}".into(),
+                },
+                success: NotificationEventTemplate {
+                    title: "{{plan_name}} 成功".into(),
+                    body: "{{content}}".into(),
+                },
+                failure: NotificationEventTemplate {
+                    title: "{{plan_name}} 失败".into(),
+                    body: "{{content}}".into(),
+                },
+            }],
+            ..Default::default()
+        };
+        let mut target: NotificationTarget = serde_json::from_value(serde_json::json!({
+            "id": "ntfy-home",
+            "name": "ntfy",
+            "template_id": "missing",
+            "type": "ntfy",
+            "config": { "server": "https://ntfy.sh", "topic": "backup", "token": "" }
+        }))
+        .unwrap();
+        config.targets.push(target.clone());
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "notification target template does not exist"
+        );
+
+        target.template_id = "chinese".into();
+        config.targets[0] = target;
+        assert!(config.validate().is_ok());
+        assert_eq!(
+            config.template_for("chinese"),
+            Ok(Some(&config.templates[0]))
+        );
+    }
+
+    #[test]
+    fn notification_templates_reject_unknown_or_malformed_placeholders() {
+        let mut template = NotificationTemplate {
+            id: "invalid".into(),
+            name: "Invalid".into(),
+            start: NotificationEventTemplate {
+                title: "{{plan_name}}".into(),
+                body: "{{content}}".into(),
+            },
+            success: NotificationEventTemplate {
+                title: "{{unknown}}".into(),
+                body: "{{content}}".into(),
+            },
+            failure: NotificationEventTemplate {
+                title: "{{plan_name}}".into(),
+                body: "{{content}}".into(),
+            },
+        };
+        let mut config = NotificationConfig {
+            templates: vec![template.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "notification template contains an unknown placeholder"
+        );
+
+        template.success.title = "{{plan_name}".into();
+        config.templates[0] = template;
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "notification template contains a malformed placeholder"
+        );
+
+        config.templates[0].success.title = "status\r\nBcc: injected@example.com".into();
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "notification template title is invalid"
+        );
+        config.templates[0].success.title = "Status".into();
+        config.templates[0].success.body = "invalid\0body".into();
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "notification template body is invalid"
+        );
+    }
+
+    #[test]
+    fn notification_template_limits_and_ids_are_enforced() {
+        let event = NotificationEventTemplate {
+            title: "{{plan_name}}".into(),
+            body: "{{content}}".into(),
+        };
+        let template = NotificationTemplate {
+            id: "ops".into(),
+            name: "Operations".into(),
+            start: event.clone(),
+            success: event.clone(),
+            failure: event.clone(),
+        };
+        let mut config = NotificationConfig {
+            templates: vec![template.clone(), template.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "notification template IDs must be unique"
+        );
+
+        config.templates = (0..33)
+            .map(|index| NotificationTemplate {
+                id: format!("template-{index}"),
+                ..template.clone()
+            })
+            .collect();
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "at most 32 notification templates are allowed"
+        );
+
+        config.templates = (0..3)
+            .map(|index| NotificationTemplate {
+                id: format!("large-{index}"),
+                start: NotificationEventTemplate {
+                    body: "x".repeat(8_000),
+                    ..event.clone()
+                },
+                success: NotificationEventTemplate {
+                    body: "x".repeat(8_000),
+                    ..event.clone()
+                },
+                failure: NotificationEventTemplate {
+                    body: "x".repeat(8_000),
+                    ..event.clone()
+                },
+                ..template.clone()
+            })
+            .collect();
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "notification template library is too large"
+        );
+
+        config.templates = vec![NotificationTemplate {
+            id: "bad id".into(),
+            ..template
+        }];
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "notification template ID is invalid"
+        );
+    }
+
+    #[test]
     fn legacy_email_target_is_normalized_to_standard_smtp_fields() {
         let mut config = NotificationConfig {
             targets: vec![NotificationTarget {
                 id: "legacy-mail".into(),
                 name: "Email".into(),
+                template_id: String::new(),
                 enabled: true,
                 on_start: false,
                 on_success: true,
@@ -1712,6 +2034,7 @@ mod tests {
                 .as_legacy(&NotificationTarget {
                     id: "mail".into(),
                     name: "Email".into(),
+                    template_id: String::new(),
                     enabled: true,
                     on_start: false,
                     on_success: true,
@@ -1731,6 +2054,7 @@ mod tests {
         let stored = NotificationTarget {
             id: "same-id".into(),
             name: "ntfy".into(),
+            template_id: String::new(),
             enabled: true,
             on_start: false,
             on_success: true,
@@ -1746,6 +2070,7 @@ mod tests {
         let incoming = NotificationTarget {
             id: "same-id".into(),
             name: "Ping".into(),
+            template_id: String::new(),
             enabled: true,
             on_start: false,
             on_success: true,

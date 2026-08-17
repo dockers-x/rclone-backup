@@ -10,8 +10,8 @@ use axum::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use rclone_backup_core::{
-    GlobalNotificationSettings, NotificationConfig, NotificationTargetKind, Plan, PlanInput,
-    REDACTED, RunRecord,
+    GlobalNotificationSettings, NotificationConfig, NotificationTargetKind, NotificationTemplate,
+    Plan, PlanInput, REDACTED, RunRecord,
 };
 use rclone_backup_runner::Runner;
 use rclone_backup_store::Store;
@@ -32,7 +32,14 @@ pub struct AppState {
     pub site_name: String,
 }
 
-const FRONTEND_ROUTES: &[&str] = &["/", "/plans", "/accounts", "/notifications", "/history"];
+const FRONTEND_ROUTES: &[&str] = &[
+    "/",
+    "/plans",
+    "/accounts",
+    "/notifications",
+    "/templates",
+    "/history",
+];
 
 pub fn router(state: AppState) -> Router {
     let protected = FRONTEND_ROUTES
@@ -68,6 +75,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/notifications",
             get(get_notifications).put(update_notifications),
+        )
+        .route(
+            "/api/notification-templates",
+            put(update_notification_templates),
         )
         .route("/api/notifications/test", post(test_notification))
         .route("/api/runs", get(list_runs))
@@ -505,6 +516,7 @@ async fn openapi() -> impl IntoResponse {
                 "get": { "summary": "Read masked global notification settings", "responses": { "200": { "description": "Settings and migration candidates" }}},
                 "put": { "summary": "Save or confirm global notification settings", "responses": { "200": { "description": "Saved" }, "422": { "description": "Validation error" }}}
             },
+            "/api/notification-templates": { "put": { "summary": "Save the reusable notification template library", "responses": { "200": { "description": "Saved" }, "422": { "description": "Validation or reference error" }}}},
             "/api/notifications/test": { "post": { "summary": "Send a channel test using global notification settings", "responses": { "200": { "description": "Delivered" }, "422": { "description": "Validation or delivery error" }}}},
             "/api/runs": { "get": { "summary": "List persistent run history", "responses": { "200": { "description": "Runs" }}}}
         }
@@ -645,6 +657,11 @@ struct NotificationUpdate {
 }
 
 #[derive(Deserialize)]
+struct NotificationTemplateUpdate {
+    templates: Vec<NotificationTemplate>,
+}
+
+#[derive(Deserialize)]
 struct NotificationTestInput {
     target_id: String,
     #[serde(default)]
@@ -669,11 +686,10 @@ async fn update_notifications(
     State(state): State<AppState>,
     Json(input): Json<NotificationUpdate>,
 ) -> ApiResult<Json<NotificationUpdateResponse>> {
+    let _update_guard = state.store.notification_update_guard().await;
     let existing = state.store.notification_settings().await?;
-    let mut config = input.config;
-    config.merge_redacted_from(&existing.config);
-    config.normalize_email_targets();
-    config.validate().map_err(ApiError::validation)?;
+    let config = prepare_notification_update(input.config, &existing.config)
+        .map_err(ApiError::validation)?;
     config
         .validate_network_targets()
         .await
@@ -686,6 +702,41 @@ async fn update_notifications(
     state.store.save_notification_settings(&settings).await?;
     redact_notification_settings(&mut settings);
     Ok(Json(NotificationUpdateResponse { settings }))
+}
+
+fn prepare_notification_update(
+    mut config: NotificationConfig,
+    existing: &NotificationConfig,
+) -> Result<NotificationConfig, String> {
+    config.merge_redacted_from(existing);
+    config.templates.clone_from(&existing.templates);
+    config.normalize_email_targets();
+    config.validate()?;
+    Ok(config)
+}
+
+async fn update_notification_templates(
+    State(state): State<AppState>,
+    Json(input): Json<NotificationTemplateUpdate>,
+) -> ApiResult<Json<NotificationUpdateResponse>> {
+    let _update_guard = state.store.notification_update_guard().await;
+    let mut settings = state.store.notification_settings().await?;
+    replace_notification_templates(&mut settings, input.templates).map_err(ApiError::validation)?;
+    settings.updated_at = Utc::now();
+    state.store.save_notification_settings(&settings).await?;
+    redact_notification_settings(&mut settings);
+    Ok(Json(NotificationUpdateResponse { settings }))
+}
+
+fn replace_notification_templates(
+    settings: &mut GlobalNotificationSettings,
+    templates: Vec<NotificationTemplate>,
+) -> Result<(), String> {
+    let mut candidate = settings.config.clone();
+    candidate.templates = templates;
+    candidate.validate()?;
+    settings.config.templates = candidate.templates;
+    Ok(())
 }
 
 async fn test_notification(
@@ -879,12 +930,15 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::{
         FRONTEND_ROUTES, NotificationUpdateResponse, archive_password_response,
-        redact_notification_config, remote_needs_input, remote_write_result,
-        require_password_reveal_auth, same_origin_or_non_browser,
+        prepare_notification_update, redact_notification_config, remote_needs_input,
+        remote_write_result, replace_notification_templates, require_password_reveal_auth,
+        same_origin_or_non_browser,
     };
     use axum::http::{HeaderMap, HeaderValue, header};
+    use chrono::Utc;
     use rclone_backup_core::{
-        GlobalNotificationSettings, NotificationConfig, NotificationTargetKind, REDACTED,
+        GlobalNotificationSettings, NotificationConfig, NotificationTargetKind,
+        NotificationTemplate, REDACTED,
     };
     use serde_json::json;
 
@@ -902,7 +956,14 @@ mod tests {
     fn frontend_history_routes_share_the_index_registration() {
         assert_eq!(
             FRONTEND_ROUTES,
-            ["/", "/plans", "/accounts", "/notifications", "/history"]
+            [
+                "/",
+                "/plans",
+                "/accounts",
+                "/notifications",
+                "/templates",
+                "/history"
+            ]
         );
     }
 
@@ -1019,6 +1080,7 @@ mod tests {
             targets: vec![rclone_backup_core::NotificationTarget {
                 id: "mail".into(),
                 name: "Email".into(),
+                template_id: String::new(),
                 enabled: true,
                 on_start: false,
                 on_success: true,
@@ -1060,6 +1122,7 @@ mod tests {
             targets: vec![rclone_backup_core::NotificationTarget {
                 id: "legacy-mail".into(),
                 name: "Email".into(),
+                template_id: String::new(),
                 enabled: true,
                 on_start: false,
                 on_success: true,
@@ -1102,5 +1165,78 @@ mod tests {
         let value = serde_json::to_value(response).unwrap();
 
         assert!(value.get("config").is_some());
+    }
+
+    #[test]
+    fn template_update_preserves_settings_and_rejects_dangling_references() {
+        let event = rclone_backup_core::NotificationEventTemplate {
+            title: "{{plan_name}}".into(),
+            body: "{{content}}".into(),
+        };
+        let template = NotificationTemplate {
+            id: "custom".into(),
+            name: "Custom".into(),
+            start: event.clone(),
+            success: event.clone(),
+            failure: event,
+        };
+        let mut settings = GlobalNotificationSettings {
+            confirmed: true,
+            config: serde_json::from_value(serde_json::json!({
+                "targets": [{
+                    "id": "ntfy",
+                    "name": "ntfy",
+                    "template_id": "custom",
+                    "enabled": true,
+                    "on_success": true,
+                    "type": "ntfy",
+                    "config": { "server": "https://ntfy.sh", "topic": "backup", "token": "" }
+                }],
+                "templates": [template.clone()]
+            }))
+            .unwrap(),
+            updated_at: Utc::now(),
+        };
+        let original = settings.clone();
+
+        assert!(replace_notification_templates(&mut settings, vec![]).is_err());
+        assert_eq!(settings, original);
+        assert!(replace_notification_templates(&mut settings, vec![template]).is_ok());
+        assert!(settings.confirmed);
+        assert_eq!(settings.config.targets, original.config.targets);
+    }
+
+    #[test]
+    fn notification_update_cannot_overwrite_the_template_library() {
+        let event = rclone_backup_core::NotificationEventTemplate {
+            title: "{{plan_name}}".into(),
+            body: "{{content}}".into(),
+        };
+        let stored_template = NotificationTemplate {
+            id: "stored".into(),
+            name: "Stored".into(),
+            start: event.clone(),
+            success: event.clone(),
+            failure: event.clone(),
+        };
+        let stale_template = NotificationTemplate {
+            id: "stale".into(),
+            name: "Stale".into(),
+            start: event.clone(),
+            success: event.clone(),
+            failure: event,
+        };
+        let existing = NotificationConfig {
+            templates: vec![stored_template.clone()],
+            ..Default::default()
+        };
+        let incoming = NotificationConfig {
+            templates: vec![stale_template],
+            ..Default::default()
+        };
+
+        let prepared = prepare_notification_update(incoming, &existing).unwrap();
+
+        assert_eq!(prepared.templates, vec![stored_template]);
     }
 }

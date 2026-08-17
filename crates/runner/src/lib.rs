@@ -183,11 +183,7 @@ impl Runner {
             .await
             .map_err(anyhow::Error::msg)?;
         if let Some(target) = config.targets.iter().find(|target| target.id == target_id) {
-            let mut target = target.clone();
-            target.enabled = true;
-            target.on_success = true;
-            let mut test = NotificationConfig::default();
-            test.targets.push(target);
+            let test = target_test_config(&config, target);
             test.validate().map_err(anyhow::Error::msg)?;
             let report = rclone_backup_notifications::deliver(
                 "Rclone Backup Test",
@@ -856,6 +852,20 @@ impl Runner {
     }
 }
 
+fn target_test_config(
+    config: &NotificationConfig,
+    target: &rclone_backup_core::NotificationTarget,
+) -> NotificationConfig {
+    let mut target = target.clone();
+    target.enabled = true;
+    target.on_success = true;
+    NotificationConfig {
+        targets: vec![target],
+        templates: config.templates.clone(),
+        ..Default::default()
+    }
+}
+
 async fn create_private_dir(path: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(path).await?;
     #[cfg(unix)]
@@ -1352,6 +1362,46 @@ mod tests {
     fn names_and_secrets_are_safe() {
         assert_eq!(safe_name("My Files / 1"), "my-files---1");
         assert_eq!(redact("token=secret", &["secret".into()]), "token=••••••••");
+    }
+
+    #[test]
+    fn target_notification_test_keeps_selected_template() {
+        let event = rclone_backup_core::NotificationEventTemplate {
+            title: "{{plan_name}} custom".into(),
+            body: "{{content}}".into(),
+        };
+        let target = rclone_backup_core::NotificationTarget {
+            id: "ntfy-test".into(),
+            name: "ntfy".into(),
+            template_id: "custom".into(),
+            enabled: true,
+            on_start: false,
+            on_success: true,
+            on_failure: true,
+            kind: rclone_backup_core::NotificationTargetKind::Ntfy {
+                config: rclone_backup_core::NtfyTargetConfig {
+                    server: "https://ntfy.sh".into(),
+                    topic: "backup".into(),
+                    token: String::new(),
+                },
+            },
+        };
+        let config = NotificationConfig {
+            targets: vec![target.clone()],
+            templates: vec![rclone_backup_core::NotificationTemplate {
+                id: "custom".into(),
+                name: "Custom".into(),
+                start: event.clone(),
+                success: event.clone(),
+                failure: event,
+            }],
+            ..Default::default()
+        };
+
+        let test = target_test_config(&config, &target);
+
+        assert_eq!(test.templates, config.templates);
+        assert!(test.validate().is_ok());
     }
 
     #[tokio::test]

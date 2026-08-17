@@ -48,7 +48,7 @@ const translations = {
     globalSettings: "全局设置", notConfigured: "未配置", configured: "已启用", globalNotificationHint: "所有手动与定时备份共用这一套通知配置。",
     pingHint: "向健康检查或 Webhook URL 报告备份事件", enablePing: "启用 Ping", completionUrl: "完成 URL（成功或失败）", startUrl: "开始 URL", successUrl: "成功 URL", failureUrl: "失败 URL",
     onStart: "开始", onSuccess: "成功", onFailure: "失败", smtpGlobalHint: "需填写 smtps:// 服务器和发件地址", enableSmtp: "启用 SMTP", enableServerChan: "启用 ServerChan",
-    sendTest: "发送测试", testingNotification: "正在发送…", notificationTestSuccess: "测试成功", saveNotifications: "保存通知配置", notificationSaved: "通知配置已保存", updatedAt: "更新于", addNotification: "添加目标", noNotificationTargets: "还没有通知目标", noNotificationTargetsHint: "添加 Ping、Email、Server酱或 ntfy；同一类型可以添加多个。", notificationName: "目标名称", notificationEvents: "通知事件", notificationTargets: "通知目标", notificationType: "通知类型", enableNotification: "启用通知目标", serverChanApp: "Server酱 App 推送", serverChanWechat: "Server酱微信推送", removeNotification: "删除目标", collapse: "收起", testFailed: "测试失败",
+    sendTest: "发送测试", testingNotification: "正在发送…", notificationTestSuccess: "测试成功", saveNotifications: "保存通知配置", notificationSaved: "通知配置已保存", updatedAt: "更新于", addNotification: "添加目标", noNotificationTargets: "还没有通知目标", noNotificationTargetsHint: "添加 Ping、Email、Server酱或 ntfy；同一类型可以添加多个。", notificationName: "目标名称", notificationEvents: "通知事件", notificationTargets: "通知目标", notificationType: "通知类型", enableNotification: "启用通知目标", serverChanApp: "Server酱 App 推送", serverChanWechat: "Server酱微信推送", removeNotification: "删除目标", collapse: "收起", testFailed: "测试失败", notificationTemplates: "通知模板", messageLibrary: "消息内容库", templateLibraryHint: "集中维护通知内容，再由每个通知目标选择需要使用的模板。", createTemplate: "新建模板", builtInTemplate: "默认英文", builtInTemplateHint: "内置只读模板，兼容已有通知。", templateName: "模板名称", selectedTemplate: "使用模板", templateDefault: "默认英文", templateStart: "开始", templateSuccess: "成功", templateFailure: "失败", templateTitle: "通知标题", templateBody: "通知正文", templatePlaceholders: "可用变量", templatePreview: "实时预览", templateUsedBy: "{count} 个目标使用", templateUnused: "尚未使用", duplicateTemplate: "复制模板", deleteTemplate: "删除模板", saveTemplates: "保存模板", templateSaved: "通知模板已保存", templateDeleteBlocked: "请先为这些通知目标选择其他模板：{targets}", templateDeleteConfirm: "删除模板“{name}”？", customEvents: "已自定义 3 个事件", readOnly: "只读",
   },
   en: {
     skip: "Skip to main content", plans: "Backup plans", history: "Run history", serviceOnline: "Service online",
@@ -96,14 +96,14 @@ const translations = {
     globalSettings: "Global settings", notConfigured: "Not configured", configured: "Enabled", globalNotificationHint: "All manual and scheduled backups share this notification configuration.",
     pingHint: "Report backup events to health-check or webhook URLs", enablePing: "Enable Ping", completionUrl: "Completion URL (success or failure)", startUrl: "Start URL", successUrl: "Success URL", failureUrl: "Failure URL",
     onStart: "Start", onSuccess: "Success", onFailure: "Failure", smtpGlobalHint: "Requires an smtps:// server and sender address", enableSmtp: "Enable SMTP", enableServerChan: "Enable ServerChan",
-    sendTest: "Send test", testingNotification: "Sending…", notificationTestSuccess: "Test succeeded", saveNotifications: "Save notifications", notificationSaved: "Notification settings saved", updatedAt: "Updated", addNotification: "Add target", noNotificationTargets: "No notification targets", noNotificationTargetsHint: "Add Ping, Email, ServerChan, or ntfy. You can add more than one of each type.", notificationName: "Target name", notificationEvents: "Notification events", notificationTargets: "Notification targets", notificationType: "Notification type", enableNotification: "Enable notification target", serverChanApp: "ServerChan App Push", serverChanWechat: "ServerChan WeChat Push", removeNotification: "Delete target", collapse: "Collapse", testFailed: "Test failed",
+    sendTest: "Send test", testingNotification: "Sending…", notificationTestSuccess: "Test succeeded", saveNotifications: "Save notifications", notificationSaved: "Notification settings saved", updatedAt: "Updated", addNotification: "Add target", noNotificationTargets: "No notification targets", noNotificationTargetsHint: "Add Ping, Email, ServerChan, or ntfy. You can add more than one of each type.", notificationName: "Target name", notificationEvents: "Notification events", notificationTargets: "Notification targets", notificationType: "Notification type", enableNotification: "Enable notification target", serverChanApp: "ServerChan App Push", serverChanWechat: "ServerChan WeChat Push", removeNotification: "Delete target", collapse: "Collapse", testFailed: "Test failed", notificationTemplates: "Notification templates", messageLibrary: "Message library", templateLibraryHint: "Maintain message content once, then choose a template for each notification target.", createTemplate: "New template", builtInTemplate: "Default English", builtInTemplateHint: "Read-only built-in template for existing notifications.", templateName: "Template name", selectedTemplate: "Template", templateDefault: "Default English", templateStart: "Start", templateSuccess: "Success", templateFailure: "Failure", templateTitle: "Notification title", templateBody: "Notification body", templatePlaceholders: "Available variables", templatePreview: "Live preview", templateUsedBy: "Used by {count} targets", templateUnused: "Not in use", duplicateTemplate: "Duplicate template", deleteTemplate: "Delete template", saveTemplates: "Save templates", templateSaved: "Notification templates saved", templateDeleteBlocked: "Choose another template for these targets first: {targets}", templateDeleteConfirm: "Delete template “{name}”?", customEvents: "3 customized events", readOnly: "Read only",
   },
 };
 
 const state = {
   language: localStorage.getItem("language") || (navigator.language.startsWith("zh") ? "zh" : "en"),
   theme: localStorage.getItem("theme") || "system",
-  plans: [], runs: [], remotes: [], notifications: null, notificationTargets: [], expandedNotificationId: null, status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, remoteVisibleOptions: new Set(), openRunId: null, page: "plans",
+  plans: [], runs: [], remotes: [], notifications: null, notificationTargets: [], notificationTemplates: [], expandedNotificationId: null, selectedTemplateId: "", selectedTemplateEvent: "success", status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, remoteVisibleOptions: new Set(), openRunId: null, page: "plans",
 };
 let providerComboboxSequence = 0;
 
@@ -111,6 +111,7 @@ const pageRoutes = {
   plans: { path: "/plans", title: "backupPlans" },
   accounts: { path: "/accounts", title: "storageAccounts" },
   notifications: { path: "/notifications", title: "notifications" },
+  templates: { path: "/templates", title: "notificationTemplates" },
   history: { path: "/history", title: "history" },
 };
 const pageNames = new Set(Object.keys(pageRoutes));
@@ -143,7 +144,12 @@ function applyFrameworkComponents(root = document) {
 function escapeHtml(value = "") {
   const node = document.createElement("div");
   node.textContent = String(value);
-  return node.innerHTML;
+  return node.innerHTML.replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
+function duplicateTemplateName(name) {
+  const suffix = ` · ${t("duplicateTemplate")}`;
+  return `${Array.from(name).slice(0, Math.max(0, 80 - Array.from(suffix).length)).join("")}${suffix}`;
 }
 
 async function api(path, options = {}) {
@@ -254,6 +260,8 @@ async function loadAll() {
     ]);
     Object.assign(state, { plans, runs, status, notifications, remotes: remoteResponse.remotes || [] });
     state.notificationTargets = structuredClone(notifications.config?.targets || []);
+    state.notificationTemplates = structuredClone(notifications.config?.templates || []);
+    if (state.selectedTemplateId && !state.notificationTemplates.some((template) => template.id === state.selectedTemplateId)) state.selectedTemplateId = "";
     const rcloneVersion = health.rclone_version ? ` · rclone ${health.rclone_version}` : "";
     $("#version").textContent = `v${health.version}${rcloneVersion}`;
     document.title = health.site_name;
@@ -271,6 +279,7 @@ function render(syncNotifications = false) {
   renderPlans();
   renderAccounts();
   renderNotifications(syncNotifications);
+  renderTemplates(syncNotifications);
   renderRuns();
   renderStatus();
   applyFrameworkComponents();
@@ -279,7 +288,10 @@ function render(syncNotifications = false) {
 function renderNotifications(syncFromServer = false) {
   const settings = state.notifications;
   if (!settings) return;
-  if (syncFromServer) state.notificationTargets = structuredClone(settings.config?.targets || []);
+  if (syncFromServer) {
+    state.notificationTargets = structuredClone(settings.config?.targets || []);
+    state.notificationTemplates = structuredClone(settings.config?.templates || []);
+  }
   const active = settings.confirmed && state.notificationTargets.some((target) => target.enabled);
   const badge = $("#notificationState"); badge.textContent = t(active ? "configured" : "notConfigured"); badge.className = `badge ${active ? "enabled" : "disabled"}`;
   $("#notificationSavedAt").textContent = settings.confirmed ? `${t("updatedAt")} ${new Intl.DateTimeFormat(state.language === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(settings.updated_at))}` : "";
@@ -297,6 +309,28 @@ function notificationDetail(target) {
   if (target.type === "ntfy") return config.topic ? `${config.server || "ntfy"} / ${config.topic}` : t("notConfigured");
   if (target.type === "serverchan") return config.send_key ? "••••••••" : t("notConfigured");
   return config.completion_url || config.success_url || config.start_url || config.failure_url || t("notConfigured");
+}
+
+function builtInTemplate() {
+  return {
+    id: "", name: t("builtInTemplate"), builtIn: true,
+    start: { title: "{{plan_name}} Backup Start", body: "{{content}}" },
+    success: { title: "{{plan_name}} Backup Success", body: "{{content}}" },
+    failure: { title: "{{plan_name}} Backup Failed", body: "{{content}}" },
+  };
+}
+
+function templateById(id = "") {
+  return id ? state.notificationTemplates.find((template) => template.id === id) : builtInTemplate();
+}
+
+function templateName(id = "") {
+  return templateById(id)?.name || t("builtInTemplate");
+}
+
+function templateSelector(target) {
+  const options = [builtInTemplate(), ...state.notificationTemplates].map((template) => `<option value="${escapeHtml(template.id)}" ${target.template_id === template.id ? "selected" : ""}>${escapeHtml(template.name)}</option>`).join("");
+  return `<label class="field span-2"><span>${escapeHtml(t("selectedTemplate"))}</span><select data-notification-template>${options}</select></label>`;
 }
 
 function notificationFields(target) {
@@ -319,9 +353,10 @@ function renderNotificationTargets() {
   list.innerHTML = state.notificationTargets.map((target, index) => {
     const expanded = state.expandedNotificationId === target.id;
     const events = [target.on_start && t("onStart"), target.on_success && t("onSuccess"), target.on_failure && t("onFailure")].filter(Boolean).join(" · ") || "—";
+    const template = templateName(target.template_id);
     return `<li class="notification-target" data-id="${escapeHtml(target.id)}" style="--index:${index}">
-      <div class="notification-row"><span class="channel-icon">${icon(target.type === "ping" ? "globe" : "bell")}</span><button type="button" class="notification-identity" data-action="toggle-notification" aria-expanded="${expanded}" aria-controls="notification-editor-${escapeHtml(target.id)}"><b>${escapeHtml(target.name)}</b><small>${escapeHtml(notificationDetail(target))}</small></button><span class="notification-meta"><span>${escapeHtml(notificationTypeLabel(target))}</span><small>${escapeHtml(events)}</small></span><label class="compact-switch"><input type="checkbox" data-notification-enabled ${target.enabled ? "checked" : ""} aria-label="${escapeHtml(`${t("enableNotification")} ${target.name}`)}"><i></i></label><button class="icon-button" type="button" data-action="toggle-notification" tabindex="-1" aria-label="${escapeHtml(t(expanded ? "collapse" : "edit"))}">${icon(expanded ? "chevron-up" : "chevron-down")}</button></div>
-      <div class="notification-editor" id="notification-editor-${escapeHtml(target.id)}" ${expanded ? "" : "hidden"}><fieldset><legend>${escapeHtml(notificationTypeLabel(target))}</legend><div class="form-grid">${inputName(target)}${notificationFields(target)}</div><fieldset class="event-fieldset"><legend>${escapeHtml(t("notificationEvents"))}</legend><div class="event-options">${["start", "success", "failure"].map((event) => `<label><input type="checkbox" data-notification-event="${event}" ${target[`on_${event}`] ? "checked" : ""}><span>${escapeHtml(t(`on${event[0].toUpperCase()}${event.slice(1)}`))}</span></label>`).join("")}</div></fieldset><div class="notification-editor-actions"><button class="button ghost danger-text" type="button" data-action="remove-notification">${escapeHtml(t("removeNotification"))}</button><span class="target-test-status" role="status"></span><button class="button ghost" type="button" data-action="test-notification" data-id="${escapeHtml(target.id)}">${escapeHtml(t("sendTest"))}</button></div></fieldset></div>
+      <div class="notification-row"><span class="channel-icon">${icon(target.type === "ping" ? "globe" : "bell")}</span><button type="button" class="notification-identity" data-action="toggle-notification" aria-expanded="${expanded}" aria-controls="notification-editor-${escapeHtml(target.id)}"><b>${escapeHtml(target.name)}</b><small>${escapeHtml(notificationDetail(target))}</small></button><span class="notification-meta"><span>${escapeHtml(notificationTypeLabel(target))}</span><small>${escapeHtml(`${template} · ${events}`)}</small></span><label class="compact-switch"><input type="checkbox" data-notification-enabled ${target.enabled ? "checked" : ""} aria-label="${escapeHtml(`${t("enableNotification")} ${target.name}`)}"><i></i></label><button class="icon-button" type="button" data-action="toggle-notification" tabindex="-1" aria-label="${escapeHtml(t(expanded ? "collapse" : "edit"))}">${icon(expanded ? "chevron-up" : "chevron-down")}</button></div>
+      <div class="notification-editor" id="notification-editor-${escapeHtml(target.id)}" ${expanded ? "" : "hidden"}><fieldset><legend>${escapeHtml(notificationTypeLabel(target))}</legend><div class="form-grid">${inputName(target)}${templateSelector(target)}${notificationFields(target)}</div><fieldset class="event-fieldset"><legend>${escapeHtml(t("notificationEvents"))}</legend><div class="event-options">${["start", "success", "failure"].map((event) => `<label><input type="checkbox" data-notification-event="${event}" ${target[`on_${event}`] ? "checked" : ""}><span>${escapeHtml(t(`on${event[0].toUpperCase()}${event.slice(1)}`))}</span></label>`).join("")}</div></fieldset><div class="notification-editor-actions"><button class="button ghost danger-text" type="button" data-action="remove-notification">${escapeHtml(t("removeNotification"))}</button><span class="target-test-status" role="status"></span><button class="button ghost" type="button" data-action="test-notification" data-id="${escapeHtml(target.id)}">${escapeHtml(t("sendTest"))}</button></div></fieldset></div>
     </li>`;
   }).join("");
 }
@@ -332,14 +367,97 @@ function inputName(target) {
 
 function collectNotifications() {
   if (!$("#notificationForm").reportValidity()) throw new Error(t("formInvalid"));
-  return { targets: structuredClone(state.notificationTargets), ping: {}, mail: {}, serverchan: {} };
+  return notificationConfig();
+}
+
+function notificationConfig() {
+  return { targets: structuredClone(state.notificationTargets), templates: structuredClone(state.notificationTemplates), ping: {}, mail: {}, serverchan: {} };
 }
 
 async function saveNotifications(event) {
   event.preventDefault(); const button = $("#saveNotificationsButton");
-  try { button.disabled = true; const response = await api("/api/notifications", { method: "PUT", body: JSON.stringify({ config: collectNotifications() }) }); state.notifications = response; state.notificationTargets = structuredClone(response.config?.targets || []); $("#notificationError").hidden = true; renderNotifications(); toast(t("notificationSaved")); }
+  try { button.disabled = true; const response = await api("/api/notifications", { method: "PUT", body: JSON.stringify({ config: collectNotifications() }) }); state.notifications = response; state.notificationTargets = structuredClone(response.config?.targets || []); state.notificationTemplates = structuredClone(response.config?.templates || []); $("#notificationError").hidden = true; renderNotifications(); renderTemplates(); toast(t("notificationSaved")); }
   catch (error) { $("#notificationError").textContent = error.message; $("#notificationError").hidden = false; }
   finally { button.disabled = false; }
+}
+
+function templateUsage(templateId) {
+  return state.notificationTargets.filter((target) => (target.template_id || "") === templateId);
+}
+
+function templateUsageText(templateId) {
+  const count = templateUsage(templateId).length;
+  return count ? t("templateUsedBy").replace("{count}", count) : t("templateUnused");
+}
+
+function renderTemplates(syncFromServer = false) {
+  if (!state.notifications) return;
+  if (syncFromServer) state.notificationTemplates = structuredClone(state.notifications.config?.templates || []);
+  if (state.selectedTemplateId && !state.notificationTemplates.some((template) => template.id === state.selectedTemplateId)) state.selectedTemplateId = "";
+  renderTemplateList();
+  renderTemplateEditor();
+  applyFrameworkComponents($("[data-page=\"templates\"]"));
+}
+
+function renderTemplateList() {
+  const templates = [builtInTemplate(), ...state.notificationTemplates];
+  $("#templateList").innerHTML = templates.map((template) => {
+    const selected = state.selectedTemplateId === template.id;
+    return `<button class="template-list-item ${selected ? "selected" : ""}" type="button" data-action="select-template" data-template-id="${escapeHtml(template.id)}" aria-pressed="${selected}"><span class="template-list-icon">${icon(template.builtIn ? "check" : "edit")}</span><span><b>${escapeHtml(template.name)}</b><small>${escapeHtml(template.builtIn ? t("builtInTemplateHint") : templateUsageText(template.id))}</small></span>${template.builtIn ? `<em>${escapeHtml(t("readOnly"))}</em>` : ""}</button>`;
+  }).join("");
+}
+
+function renderTemplateEditor() {
+  const template = templateById(state.selectedTemplateId) || builtInTemplate();
+  const event = state.selectedTemplateEvent;
+  const message = template[event];
+  const readOnly = Boolean(template.builtIn);
+  const tabs = ["start", "success", "failure"].map((name) => `<button type="button" role="tab" aria-selected="${event === name}" class="template-tab ${event === name ? "selected" : ""}" data-action="select-template-event" data-template-event="${name}">${escapeHtml(t(`template${name[0].toUpperCase()}${name.slice(1)}`))}</button>`).join("");
+  $("#templateEditor").innerHTML = `<header class="template-editor-head"><div><span>${escapeHtml(readOnly ? t("builtInTemplateHint") : templateUsageText(template.id))}</span><h3>${escapeHtml(template.name)}</h3></div><div class="template-editor-tools"><button class="button ghost" type="button" data-action="duplicate-template">${escapeHtml(t("duplicateTemplate"))}</button>${readOnly ? "" : `<button class="button ghost danger-text" type="button" data-action="delete-template">${escapeHtml(t("deleteTemplate"))}</button>`}</div></header>
+    ${readOnly ? "" : `<label class="field template-name-field"><span>${escapeHtml(t("templateName"))}</span><input data-template-name maxlength="80" required value="${escapeHtml(template.name)}"></label>`}
+    <div class="template-tabs" role="tablist" aria-label="${escapeHtml(t("notificationEvents"))}">${tabs}</div>
+    <div class="template-fields"><label class="field"><span>${escapeHtml(t("templateTitle"))}</span><input data-template-field="title" maxlength="200" required value="${escapeHtml(message.title)}" ${readOnly ? "readonly" : ""}></label><label class="field"><span>${escapeHtml(t("templateBody"))}</span><textarea data-template-field="body" maxlength="8000" required rows="8" ${readOnly ? "readonly" : ""}>${escapeHtml(message.body)}</textarea></label></div>
+    <div class="template-placeholders"><span>${escapeHtml(t("templatePlaceholders"))}</span><code>{{plan_name}}</code><code>{{event}}</code><code>{{content}}</code></div>
+    <section class="template-preview" aria-live="polite"><span>${escapeHtml(t("templatePreview"))}</span><strong id="templatePreviewTitle"></strong><pre id="templatePreviewBody"></pre></section>
+    <footer class="template-save"><button class="button primary" type="submit" ${readOnly ? "hidden" : ""}>${escapeHtml(t("saveTemplates"))}</button></footer>`;
+  renderTemplatePreview();
+}
+
+function renderTemplateValue(value, event) {
+  const values = { plan_name: "Rclone Backup Test", event, content: "Notification test from Rclone Backup" };
+  return value.replace(/\{\{(plan_name|event|content)\}\}/g, (_placeholder, key) => values[key]);
+}
+
+function renderTemplatePreview() {
+  const template = templateById(state.selectedTemplateId) || builtInTemplate();
+  const message = template[state.selectedTemplateEvent];
+  const title = $("#templatePreviewTitle");
+  const body = $("#templatePreviewBody");
+  if (!title || !body) return;
+  title.textContent = renderTemplateValue(message.title, state.selectedTemplateEvent);
+  body.textContent = renderTemplateValue(message.body, state.selectedTemplateEvent);
+}
+
+async function saveTemplates(event) {
+  event.preventDefault();
+  if (!event.currentTarget.reportValidity()) return;
+  const button = $("button[type=submit]", event.currentTarget);
+  try {
+    button.disabled = true;
+    const response = await api("/api/notification-templates", { method: "PUT", body: JSON.stringify({ templates: structuredClone(state.notificationTemplates) }) });
+    state.notifications = response;
+    state.notificationTargets = structuredClone(response.config?.targets || []);
+    state.notificationTemplates = structuredClone(response.config?.templates || []);
+    $("#templateError").hidden = true;
+    renderTemplates();
+    renderNotifications();
+    toast(t("templateSaved"));
+  } catch (error) {
+    $("#templateError").textContent = error.message;
+    $("#templateError").hidden = false;
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function renderStatus() {
@@ -1100,7 +1218,9 @@ document.addEventListener("click", async (event) => {
   }
   if (button.id === "languageButton") {
     state.language = state.language === "zh" ? "en" : "zh";
-    localStorage.setItem("language", state.language); render();
+    localStorage.setItem("language", state.language);
+    $("#templateError").hidden = true;
+    render();
   }
   if (button.id === "menuButton") setMenuOpen(!document.body.classList.contains("menu-open"));
   if (button.matches("[data-page-link]")) {
@@ -1189,6 +1309,61 @@ document.addEventListener("click", async (event) => {
     button.innerHTML = icon(visible ? "eye-off" : "eye");
     input.focus();
   }
+  if (action === "select-template") {
+    state.selectedTemplateId = button.dataset.templateId || "";
+    renderTemplates();
+  }
+  if (action === "select-template-event") {
+    state.selectedTemplateEvent = button.dataset.templateEvent;
+    renderTemplateEditor();
+    applyFrameworkComponents($("#templateEditor"));
+  }
+  if (action === "add-template") {
+    if (state.notificationTemplates.length >= 32) return;
+    const id = crypto.randomUUID();
+    const source = builtInTemplate();
+    state.notificationTemplates.push({
+      id,
+      name: state.language === "zh" ? `通知模板 ${state.notificationTemplates.length + 1}` : `Notification template ${state.notificationTemplates.length + 1}`,
+      start: structuredClone(source.start),
+      success: structuredClone(source.success),
+      failure: structuredClone(source.failure),
+    });
+    state.selectedTemplateId = id;
+    renderTemplates();
+    requestAnimationFrame(() => $("[data-template-name]")?.focus());
+  }
+  if (action === "duplicate-template") {
+    if (state.notificationTemplates.length >= 32) return;
+    const source = templateById(state.selectedTemplateId) || builtInTemplate();
+    const id = crypto.randomUUID();
+    state.notificationTemplates.push({
+      id,
+      name: duplicateTemplateName(source.name),
+      start: structuredClone(source.start),
+      success: structuredClone(source.success),
+      failure: structuredClone(source.failure),
+    });
+    state.selectedTemplateId = id;
+    renderTemplates();
+    requestAnimationFrame(() => $("[data-template-name]")?.select());
+  }
+  if (action === "delete-template") {
+    const template = templateById(state.selectedTemplateId);
+    if (!template || template.builtIn) return;
+    const targets = templateUsage(template.id);
+    if (targets.length) {
+      $("#templateError").textContent = t("templateDeleteBlocked").replace("{targets}", targets.map((target) => target.name).join(", "));
+      $("#templateError").hidden = false;
+      return;
+    }
+    if (confirm(t("templateDeleteConfirm").replace("{name}", template.name))) {
+      state.notificationTemplates = state.notificationTemplates.filter((item) => item.id !== template.id);
+      state.selectedTemplateId = "";
+      $("#templateError").hidden = true;
+      renderTemplates();
+    }
+  }
   if (action === "add-notification") {
     if (state.notificationTargets.length >= 32) return;
     const selected = $("#notificationType").value;
@@ -1199,7 +1374,7 @@ document.addEventListener("click", async (event) => {
       : type === "serverchan" ? { channel, send_key: "" }
       : { server: "https://ntfy.sh", topic: "", token: "" };
     const baseName = type === "serverchan" ? t(channel === "app" ? "serverChanApp" : "serverChanWechat") : type === "email" ? "Email" : type === "ntfy" ? "ntfy" : "Ping";
-    state.notificationTargets.push({ id, name: baseName, type, enabled: true, on_start: false, on_success: true, on_failure: true, config: defaults });
+    state.notificationTargets.push({ id, name: baseName, template_id: "", type, enabled: true, on_start: false, on_success: true, on_failure: true, config: defaults });
     state.expandedNotificationId = id;
     renderNotificationTargets();
     requestAnimationFrame(() => $(`[data-id="${CSS.escape(id)}"] [data-notification-name]`)?.focus());
@@ -1278,6 +1453,7 @@ function syncNotificationField(event) {
   if (!target) return;
   if (event.target.matches("[data-notification-name]")) target.name = event.target.value;
   if (event.target.matches("[data-notification-enabled]")) target.enabled = event.target.checked;
+  if (event.target.matches("[data-notification-template]")) target.template_id = event.target.value;
   if (event.target.matches("[data-notification-event]")) target[`on_${event.target.dataset.notificationEvent}`] = event.target.checked;
   if (event.target.matches("[data-notification-field]")) {
     const field = event.target.dataset.notificationField;
@@ -1292,6 +1468,16 @@ function syncNotificationField(event) {
 }
 $("#notificationForm").addEventListener("input", syncNotificationField);
 $("#notificationForm").addEventListener("change", syncNotificationField);
+$("#templateForm").addEventListener("input", (event) => {
+  const template = templateById(state.selectedTemplateId);
+  if (!template || template.builtIn) return;
+  if (event.target.matches("[data-template-name]")) {
+    template.name = event.target.value;
+    renderTemplateList();
+  }
+  if (event.target.matches("[data-template-field]")) template[state.selectedTemplateEvent][event.target.dataset.templateField] = event.target.value;
+  renderTemplatePreview();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && document.body.classList.contains("menu-open")) { setMenuOpen(false); $("#menuButton").focus(); }
 });
@@ -1338,6 +1524,7 @@ document.addEventListener("click", (event) => {
   $$(".provider-combobox").filter((combobox) => !path.includes(combobox)).forEach(closeProviderCombobox);
 });
 $("#notificationForm").addEventListener("submit", saveNotifications);
+$("#templateForm").addEventListener("submit", saveTemplates);
 $("#providerSelect").addEventListener("change", selectProvider);
 $("#planForm").elements.archive_kind.addEventListener("change", updateArchiveHint);
 $("#planForm").elements.archive_password.addEventListener("input", updatePasswordToggle);

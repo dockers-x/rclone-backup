@@ -420,6 +420,38 @@ dialog { color: var(--text); }
 .event-options input { accent-color: var(--accent); }
 .notification-actions { min-height: 64px; padding-top: 4px; display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
 .notification-actions p { margin: 0 auto 0 0; color: var(--text-tertiary); font-size: 12px; }
+.template-workspace { min-height: 610px; display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.template-sidebar { padding: 10px; border-right: 1px solid var(--border); background: var(--surface-soft); }
+.template-list { display: grid; gap: 4px; }
+.template-list-item { width: 100%; min-height: 72px; padding: 10px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; transition: background-color 150ms ease, transform 130ms var(--ease-out); }
+.template-list-item:active { transform: scale(.97); }
+.template-list-item.selected { background: var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 10%); }
+.template-list-item b, .template-list-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.template-list-item b { font-size: 13px; }
+.template-list-item small { margin-top: 3px; color: var(--text-tertiary); font-size: 11px; }
+.template-list-item em { padding: 3px 6px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); color: var(--text-secondary); font-size: 10px; font-style: normal; }
+.template-list-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 7px; background: var(--border); color: var(--text-secondary); }
+.template-list-icon svg { width: 15px; height: 15px; }
+.template-editor { min-width: 0; padding: 28px; }
+.template-editor-head { min-height: 58px; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.template-editor-head span { color: var(--text-tertiary); font-size: 11px; }
+.template-editor-head h3 { margin: 5px 0 0; font-size: 21px; letter-spacing: -.012em; }
+.template-editor-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.template-name-field { margin-top: 20px; }
+.template-tabs { margin: 24px 0 20px; display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.template-tab { min-width: 76px; min-height: 42px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-tertiary); font-size: 12px; font-weight: 650; cursor: pointer; transition: color 150ms ease, border-color 150ms ease, transform 130ms var(--ease-out); }
+.template-tab:active { transform: scale(.97); }
+.template-tab.selected { border-bottom-color: var(--accent); color: var(--text); }
+.template-fields { display: grid; gap: 16px; }
+.template-fields textarea { width: 100%; min-height: 180px; resize: vertical; font: 13px/1.65 "Fira Code", monospace; }
+.template-placeholders { min-height: 48px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--text-tertiary); font-size: 11px; }
+.template-placeholders code { padding: 4px 7px; border-radius: 5px; background: var(--surface-soft); color: var(--text-secondary); font-size: 11px; }
+.template-preview { margin-top: 8px; padding: 18px; display: grid; gap: 8px; border-radius: 9px; background: var(--surface-soft); }
+.template-preview > span { color: var(--text-tertiary); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.template-preview strong { overflow-wrap: anywhere; font-size: 14px; }
+.template-preview pre { max-height: 180px; margin: 0; overflow: auto; color: var(--text-secondary); font: 12px/1.65 "Fira Code", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.template-save { min-height: 68px; display: flex; align-items: flex-end; justify-content: flex-end; }
+.template-save [hidden] { display: none; }
 .migration-notice { margin: 0 0 16px; padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 10px; background: var(--accent-soft); color: var(--accent-strong); font-size: 13px; }
 .candidate-list { margin-top: 12px; display: grid; gap: 7px; }
 .candidate-list article { min-height: 58px; padding: 8px 8px 8px 12px; display: flex; align-items: center; gap: 12px; justify-content: space-between; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 8px; background: var(--surface); color: var(--text); }
@@ -462,6 +494,7 @@ dialog { color: var(--text); }
   .plan-card:hover { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: var(--shadow); }
   .button.primary:hover { background: var(--accent); }
   .nav-item:hover { color: var(--text); background: var(--surface-soft); }
+  .template-list-item:hover { background: var(--surface); }
 }
 
 @media (max-width: 980px) {
@@ -541,4 +574,15 @@ dialog { color: var(--text); }
   .notification-editor .span-2 { grid-column: auto; }
   .notification-editor-actions { align-items: stretch; flex-wrap: wrap; }
   .notification-editor-actions .target-test-status { width: 100%; order: -1; margin: 0; }
+  .template-workspace { min-height: 0; grid-template-columns: minmax(0, 1fr); overflow: visible; }
+  .template-sidebar { min-width: 0; border-right: 0; border-bottom: 1px solid var(--border); }
+  .template-list { display: flex; overflow-x: auto; scroll-snap-type: x proximity; }
+  .template-list-item { min-width: min(280px, 82vw); scroll-snap-align: start; }
+  .template-editor { width: 100%; max-width: 100%; padding: 20px 16px; overflow: hidden; }
+  .template-editor-head { align-items: stretch; flex-direction: column; }
+  .template-editor-tools { align-items: stretch; flex-direction: column; }
+  .template-editor-tools .button { width: 100%; }
+  .template-tabs { overflow-x: auto; }
+  .template-tab { flex: 1; }
+  .template-save .button { width: 100%; }
 }

@@ -1,43 +1,11 @@
-# Global notification tasks
+# Notification template library tasks
 
-- [x] Add global settings and conflict-candidate models.
-  - Acceptance: models validate channel/event combinations and URLs/options.
-  - Verify: `cargo test model::tests`.
-  - Files: `src/model.rs`.
-- [x] Add encrypted singleton persistence and legacy migration.
-  - Acceptance: identical legacy configs auto-confirm; conflicts stay inactive;
-    stored documents begin with `enc:v1:`.
-  - Verify: `cargo test store::tests`.
-  - Files: `src/store.rs`.
-- [x] Use the global snapshot for run notifications and CLI tests.
-  - Acceptance: plans no longer drive runtime notification delivery.
-  - Verify: Runner unit/integration tests and `cargo test runner::tests`.
-  - Files: `src/runner.rs`, `src/main.rs`.
-- [x] Add masked settings and test-notification APIs.
-  - Acceptance: secrets are masked, `REDACTED` preserves stored secrets, invalid
-    requests return 422, and tests never echo command arguments.
-  - Verify: `cargo test api::tests`.
-  - Files: `src/api.rs`.
-- [x] Add the independent notification UI and remove per-plan fields.
-  - Acceptance: bilingual, responsive, accessible save/test/conflict flows with
-    visible pending and completion feedback.
-  - Verify: `node --check web/app.js` plus browser checks.
-  - Files: `web/index.html`, `web/app.js`, `web/app.css`.
-- [x] Document, review, and run release gates.
-  - Acceptance: docs describe global settings and all gates pass.
-  - Verify: commands in `docs/spec-global-notifications.md`.
-  - Files: `README.md`, `tasks/todo.md`.
-- [x] Add simple schedule controls while preserving Cron compatibility.
-  - Acceptance: daily, weekly, monthly, and N-second/minute/hour rules compile
-    to valid Cron; unrecognized existing Cron stays unchanged in Cron mode.
-  - Verify: schedule unit tests, `node --check web/app.js`, and browser checks at
-    desktop and 375px.
-  - Files: `web/index.html`, `web/app.js`, `web/app.css`, `src/main.rs`,
-    `src/schedule.rs`.
-- [x] Add bounded multi-destination uploads.
-  - Acceptance: existing plans default to serial behavior; values 1–8 bound
-    active copy jobs; queued and active target states remain truthful; all
-    destination failures are aggregated after sibling jobs finish.
-  - Verify: model/runner tests, full workspace checks, and agent-browser review.
-  - Files: `crates/core/src/model.rs`, `crates/runner/src/lib.rs`, `web/index.html`,
-    `web/app.js`, `docs/spec-upload-concurrency.md`.
+- [x] Add backward-compatible template models, placeholders, limits, and
+  reference validation with focused core tests.
+- [x] Render the selected template separately for every delivery target and
+  preserve exact built-in output.
+- [x] Prove encrypted persistence, secret merging, and API validation.
+- [x] Build the bilingual `/templates` manager and per-target selector.
+- [x] Verify desktop/mobile layouts, keyboard behavior, and reduced motion.
+- [x] Document templates and update all workspace versions to 2.1.0.
+- [x] Run release gates, commit, create v2.1.0, and push main plus the tag.

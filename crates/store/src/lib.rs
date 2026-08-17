@@ -7,7 +7,8 @@ use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 use chrono::Utc;
 use rclone_backup_core::{GlobalNotificationSettings, NotificationConfig, Plan, RunRecord};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::Arc};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 use uuid::Uuid;
 
 const ENCRYPTED_PREFIX: &str = "enc:v1:";
@@ -16,6 +17,7 @@ const ENCRYPTED_PREFIX: &str = "enc:v1:";
 pub struct Store {
     pool: SqlitePool,
     cipher: Aes256Gcm,
+    notification_update_lock: Arc<Mutex<()>>,
 }
 
 impl Store {
@@ -33,6 +35,7 @@ impl Store {
         let store = Self {
             pool,
             cipher: Aes256Gcm::new_from_slice(&key).expect("AES-256 key length"),
+            notification_update_lock: Arc::new(Mutex::new(())),
         };
         store.migrate().await?;
         store.encrypt_existing_plans().await?;
@@ -151,6 +154,10 @@ impl Store {
             .unwrap_or_default();
         settings.config.normalize_email_targets();
         Ok(settings)
+    }
+
+    pub async fn notification_update_guard(&self) -> OwnedMutexGuard<()> {
+        self.notification_update_lock.clone().lock_owned().await
     }
 
     pub async fn confirmed_notifications(&self) -> anyhow::Result<Option<NotificationConfig>> {
@@ -489,6 +496,49 @@ mod tests {
                 .password,
             "never-plaintext"
         );
+    }
+
+    #[tokio::test]
+    async fn notification_templates_and_references_are_encrypted_and_persisted() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::connect(
+            "sqlite::memory:",
+            directory.path().join("key").to_str().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
+        let mut target = legacy_ping("https://notify.example/success");
+        target.template_id = "zh-ops".into();
+        let event = rclone_backup_core::NotificationEventTemplate {
+            title: "{{plan_name}} 备份状态".into(),
+            body: "{{event}}：{{content}}".into(),
+        };
+        let settings = GlobalNotificationSettings {
+            confirmed: true,
+            config: NotificationConfig {
+                targets: vec![target],
+                templates: vec![rclone_backup_core::NotificationTemplate {
+                    id: "zh-ops".into(),
+                    name: "中文运维".into(),
+                    start: event.clone(),
+                    success: event.clone(),
+                    failure: event,
+                }],
+                ..Default::default()
+            },
+            updated_at: Utc::now(),
+        };
+
+        store.save_notification_settings(&settings).await.unwrap();
+        let (document,): (String,) =
+            sqlx::query_as("SELECT document FROM settings WHERE key = 'notifications'")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert!(document.starts_with(ENCRYPTED_PREFIX));
+        assert!(!document.contains("中文运维"));
+        assert_eq!(store.notification_settings().await.unwrap(), settings);
     }
 
     fn legacy_ping(url: &str) -> rclone_backup_core::NotificationTarget {

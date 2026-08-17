@@ -201,6 +201,7 @@ fn legacy_plan_input(dotenv: &HashMap<String, String>) -> PlanInput {
         retry: RetryPolicy::default(),
         notifications: NotificationConfig {
             targets: Vec::new(),
+            templates: Vec::new(),
             ping: PingConfig {
                 enabled: false,
                 on_start: true,

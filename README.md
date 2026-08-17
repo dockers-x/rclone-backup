@@ -26,7 +26,7 @@ docker run -d \
   -p 127.0.0.1:8080:8080 \
   -v rclone-backup-data:/config \
   -v /path/to/backup:/data:ro \
-  czyt/rclone-backup:2.0.9
+  czyt/rclone-backup:2.1.0
 ```
 
 Open `http://127.0.0.1:8080`. On a fresh installation the service displays the storage wizard and remains running. Scheduled and manual backups stay locked until at least one working rclone alias exists.
@@ -69,6 +69,10 @@ docker exec -it rclone-backup rclone config
 ## Notifications
 
 The Web UI has one global notification module shared by every manual and scheduled backup. Ping, Email, ServerChan, and ntfy targets can be added more than once, each with start, success, and failure event choices and an independent test action. Notification secrets are encrypted in SQLite and masked in API responses.
+
+The separate **Notification templates** module stores reusable plain-text message templates in the same encrypted SQLite settings document. Create or duplicate a template, customize its start, success, and failure titles and bodies, then select it from any notification target. Multiple targets can share one template, and a template in use cannot be deleted until those targets select another one. Existing targets use the immutable built-in English template by default.
+
+Templates support `{{plan_name}}`, `{{event}}`, and `{{content}}`. Placeholders are expanded once at delivery time; conditions, HTML, environment variables, and credential interpolation are not supported.
 
 Email targets use standard SMTP fields for host, port, STARTTLS or TLS, sender, credentials, and recipient. Delivery uses the native Rust `lettre` mail client rather than invoking curl. Direct SMTP connections and HTTP notification endpoints are pinned to the public IP addresses resolved during validation to prevent internal-network requests and DNS rebinding. The legacy `MAIL_SMTP_VARIABLES` environment variable remains supported only for the first environment import and is converted into the standard fields.
 

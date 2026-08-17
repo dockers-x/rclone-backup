@@ -7,8 +7,9 @@ use lettre::{
     },
 };
 use rclone_backup_core::{
-    MailConfig, NotificationConfig, NotificationTarget, NotificationTargetKind, NtfyTargetConfig,
-    PingConfig, ResolvedTarget, ServerChanChannel, resolve_public_url,
+    MailConfig, NotificationConfig, NotificationTarget, NotificationTargetKind,
+    NotificationTemplate, NtfyTargetConfig, PingConfig, ResolvedTarget, ServerChanChannel,
+    resolve_public_url,
 };
 use std::{collections::HashMap, process::Stdio};
 use tokio::process::Command;
@@ -42,7 +43,15 @@ pub async fn deliver(
     let mut report = DeliveryReport::default();
     for target in &config.targets {
         if target.enabled && event_enabled(target, event) {
-            deliver_target(target, plan_name, event, content, &mut report).await;
+            let template = match config.template_for(&target.template_id) {
+                Ok(template) => template,
+                Err(error) => {
+                    report.warning(&target.name, error);
+                    continue;
+                }
+            };
+            let (title, body) = render_message(plan_name, event, content, template);
+            deliver_target(target, event, &title, &body, &mut report).await;
         }
     }
     report
@@ -50,36 +59,22 @@ pub async fn deliver(
 
 async fn deliver_target(
     target: &NotificationTarget,
-    plan_name: &str,
     event: &str,
+    title: &str,
     content: &str,
     report: &mut DeliveryReport,
 ) {
     let result = match &target.kind {
         NotificationTargetKind::Ping { config: _ } => {
-            send_ping(
-                &target.as_notification_config().ping,
-                plan_name,
-                event,
-                content,
-            )
-            .await
+            send_ping(&target.as_notification_config().ping, event, title, content).await
         }
         NotificationTargetKind::Email { config: _ } => {
-            send_mail(
-                &target.as_notification_config().mail,
-                plan_name,
-                event,
-                content,
-            )
-            .await
+            send_mail(&target.as_notification_config().mail, title, content).await
         }
         NotificationTargetKind::ServerChan { config } => {
-            send_serverchan(config.channel, &config.send_key, plan_name, event, content).await
+            send_serverchan(config.channel, &config.send_key, title, content).await
         }
-        NotificationTargetKind::Ntfy { config } => {
-            send_ntfy(config, plan_name, event, content).await
-        }
+        NotificationTargetKind::Ntfy { config } => send_ntfy(config, title, content).await,
     };
     match result {
         Ok(()) => report.success(&target.name),
@@ -109,13 +104,67 @@ fn subject(plan_name: &str, event: &str) -> String {
     )
 }
 
-async fn send_ping(
-    ping: &PingConfig,
+fn render_message(
     plan_name: &str,
     event: &str,
     content: &str,
+    template: Option<&NotificationTemplate>,
+) -> (String, String) {
+    let Some(template) = template else {
+        return (
+            sanitize_title(&subject(plan_name, event)),
+            content.to_owned(),
+        );
+    };
+    let template = template.event(event);
+    (
+        sanitize_title(&render_value(&template.title, plan_name, event, content)),
+        render_value(&template.body, plan_name, event, content),
+    )
+}
+
+fn sanitize_title(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(200)
+        .collect()
+}
+
+fn render_value(template: &str, plan_name: &str, event: &str, content: &str) -> String {
+    let mut output = String::with_capacity(template.len() + content.len());
+    let mut rest = template;
+    while let Some(open) = rest.find("{{") {
+        output.push_str(&rest[..open]);
+        let placeholder = &rest[open + 2..];
+        let Some(close) = placeholder.find("}}") else {
+            output.push_str(&rest[open..]);
+            return output;
+        };
+        match &placeholder[..close] {
+            "plan_name" => output.push_str(plan_name),
+            "event" => output.push_str(event),
+            "content" => output.push_str(content),
+            _ => output.push_str(&rest[open..open + close + 4]),
+        }
+        rest = &placeholder[close + 2..];
+    }
+    output.push_str(rest);
+    output
+}
+
+async fn send_ping(
+    ping: &PingConfig,
+    event: &str,
+    subject: &str,
+    content: &str,
 ) -> Result<(), String> {
-    let subject = subject(plan_name, event);
     let mut endpoints = Vec::new();
     if event == "start" {
         endpoints.push((&ping.start_url, &ping.start_options));
@@ -133,7 +182,7 @@ async fn send_ping(
     for (url, options) in endpoints.into_iter().filter(|(url, _)| !url.is_empty()) {
         sent = true;
         let url = url
-            .replace("%{subject}", &urlencoding(&subject))
+            .replace("%{subject}", &urlencoding(subject))
             .replace("%{content}", &urlencoding(content));
         let mut command = pinned_curl_command(&url, "Ping").await?.args([
             "--noproxy",
@@ -152,7 +201,7 @@ async fn send_ping(
         for argument in options {
             command = command.arg(
                 argument
-                    .replace("%{subject}", &subject)
+                    .replace("%{subject}", subject)
                     .replace("%{content}", content),
             );
         }
@@ -167,14 +216,8 @@ async fn send_ping(
     }
 }
 
-async fn send_mail(
-    mail: &MailConfig,
-    plan_name: &str,
-    event: &str,
-    content: &str,
-) -> Result<(), String> {
+async fn send_mail(mail: &MailConfig, subject: &str, content: &str) -> Result<(), String> {
     let options = mail_options(&mail.smtp_options)?;
-    let subject = subject(plan_name, event);
     let server = url::Url::parse(&options.server).map_err(|error| error.to_string())?;
     let host = server
         .host_str()
@@ -223,8 +266,7 @@ async fn send_mail(
 async fn send_serverchan(
     channel: ServerChanChannel,
     send_key: &str,
-    plan_name: &str,
-    event: &str,
+    subject: &str,
     content: &str,
 ) -> Result<(), String> {
     let url = if channel == ServerChanChannel::App {
@@ -235,7 +277,6 @@ async fn send_serverchan(
     } else {
         format!("https://sctapi.ftqq.com/{send_key}.send")
     };
-    let subject = subject(plan_name, event);
     let command = pinned_curl_command(&url, "ServerChan")
         .await?
         .args([
@@ -261,14 +302,8 @@ async fn send_serverchan(
     run(command).await.map_err(|error| error.to_string())
 }
 
-async fn send_ntfy(
-    config: &NtfyTargetConfig,
-    plan_name: &str,
-    event: &str,
-    content: &str,
-) -> Result<(), String> {
+async fn send_ntfy(config: &NtfyTargetConfig, title: &str, content: &str) -> Result<(), String> {
     let url = format!("{}/{}", config.server.trim_end_matches('/'), config.topic);
-    let title = subject(plan_name, event);
     let mut command = pinned_curl_command(&url, "ntfy").await?.args([
         "--noproxy",
         "*",
@@ -437,6 +472,110 @@ fn urlencoding(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn built_in_template_preserves_existing_messages() {
+        assert_eq!(
+            render_message("Daily", "start", "Start backup at now", None),
+            ("Daily Backup Start".into(), "Start backup at now".into())
+        );
+        assert_eq!(
+            render_message("Daily", "success", "Backup completed at now", None),
+            (
+                "Daily Backup Success".into(),
+                "Backup completed at now".into()
+            )
+        );
+        assert_eq!(
+            render_message("Daily", "failure", "Backup failed", None),
+            ("Daily Backup Failed".into(), "Backup failed".into())
+        );
+    }
+
+    #[test]
+    fn custom_template_renders_unicode_and_repeated_placeholders() {
+        let template = rclone_backup_core::NotificationTemplate {
+            id: "zh".into(),
+            name: "中文".into(),
+            start: rclone_backup_core::NotificationEventTemplate {
+                title: "{{plan_name}} 开始".into(),
+                body: "{{content}}".into(),
+            },
+            success: rclone_backup_core::NotificationEventTemplate {
+                title: "{{plan_name}} 成功：{{plan_name}}".into(),
+                body: "事件 {{event}}\n{{content}}".into(),
+            },
+            failure: rclone_backup_core::NotificationEventTemplate {
+                title: "{{plan_name}} 失败".into(),
+                body: "{{content}}".into(),
+            },
+        };
+
+        assert_eq!(
+            render_message("照片", "success", "完成", Some(&template)),
+            ("照片 成功：照片".into(), "事件 success\n完成".into())
+        );
+        assert_eq!(
+            render_message("{{event}}", "success", "完成", Some(&template)).0,
+            "{{event}} 成功：{{event}}"
+        );
+    }
+
+    #[test]
+    fn rendered_titles_cannot_inject_headers_or_grow_without_bound() {
+        let event = rclone_backup_core::NotificationEventTemplate {
+            title: "{{content}}".into(),
+            body: "{{content}}".into(),
+        };
+        let template = rclone_backup_core::NotificationTemplate {
+            id: "safe-title".into(),
+            name: "Safe title".into(),
+            start: event.clone(),
+            success: event.clone(),
+            failure: event,
+        };
+        let content = format!("backup failed\r\nX-Injected: yes\0{}", "界".repeat(240));
+
+        let (title, body) = render_message("Daily", "failure", &content, Some(&template));
+
+        assert!(!title.chars().any(char::is_control));
+        assert_eq!(title.chars().count(), 200);
+        assert_eq!(body, content);
+
+        let (built_in_title, _) = render_message("Daily\r\nX-Injected: yes", "failure", "", None);
+        assert!(!built_in_title.chars().any(char::is_control));
+    }
+
+    #[test]
+    fn targets_can_render_different_templates_from_one_library() {
+        let message = |label: &str| rclone_backup_core::NotificationEventTemplate {
+            title: format!("{label} {{{{plan_name}}}}"),
+            body: format!("{label} {{{{content}}}}"),
+        };
+        let first = rclone_backup_core::NotificationTemplate {
+            id: "first".into(),
+            name: "First".into(),
+            start: message("A"),
+            success: message("A"),
+            failure: message("A"),
+        };
+        let second = rclone_backup_core::NotificationTemplate {
+            id: "second".into(),
+            name: "Second".into(),
+            start: message("B"),
+            success: message("B"),
+            failure: message("B"),
+        };
+
+        assert_eq!(
+            render_message("Daily", "success", "Done", Some(&first)),
+            ("A Daily".into(), "A Done".into())
+        );
+        assert_eq!(
+            render_message("Daily", "success", "Done", Some(&second)),
+            ("B Daily".into(), "B Done".into())
+        );
+    }
 
     #[test]
     fn curl_is_pinned_to_validated_addresses() {
