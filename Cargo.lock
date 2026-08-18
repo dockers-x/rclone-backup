@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "rclone-backup"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "rclone-backup-api"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "rclone-backup-core"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -1446,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "rclone-backup-notifications"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "lettre",
@@ -1457,7 +1457,7 @@ dependencies = [
 
 [[package]]
 name = "rclone-backup-rclone"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "rand 0.9.5",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "rclone-backup-runner"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1488,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "rclone-backup-store"
-version = "2.2.0"
+version = "2.2.1"
 dependencies = [
  "aes-gcm",
  "anyhow",

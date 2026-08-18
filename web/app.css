@@ -335,7 +335,7 @@ dialog { color: var(--text); }
 .target-status.checking .target-icon, .target-status.uploading .target-icon { color: var(--accent); background: var(--accent-soft); }
 .target-status.checking .target-icon svg, .target-status.uploading .target-icon svg { animation: status-spin 900ms linear infinite; }
 .target-status.success .target-icon, .target-status.ready .target-icon { color: var(--success); background: var(--success-soft); }
-.target-status.failed .target-icon, .target-status.timed_out .target-icon, .target-status.unavailable .target-icon { color: var(--danger); background: var(--danger-soft); }
+.target-status.failed .target-icon, .target-status.timed_out .target-icon, .target-status.interrupted .target-icon, .target-status.unavailable .target-icon { color: var(--danger); background: var(--danger-soft); }
 .target-status.cancelled .target-icon { color: var(--text-tertiary); background: var(--surface-soft); }
 .target-status strong { display: block; font-size: 13px; }
 .target-status small { display: block; margin-top: 2px; color: var(--text-tertiary); font-size: 11px; overflow-wrap: anywhere; }
@@ -343,7 +343,7 @@ dialog { color: var(--text); }
 .target-status b { display: block; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
 .target-state small { font-variant-numeric: tabular-nums; }
 .target-status.success b, .target-status.ready b { color: var(--success); }
-.target-status.failed b, .target-status.timed_out b, .target-status.unavailable b { color: var(--danger); }
+.target-status.failed b, .target-status.timed_out b, .target-status.interrupted b, .target-status.unavailable b { color: var(--danger); }
 .target-status.cancelled b { color: var(--text-tertiary); }
 .target-empty { margin: 0; padding: 14px; color: var(--text-secondary); background: var(--surface-soft); border-radius: 9px; font-size: 13px; }
 @keyframes status-spin { to { transform: rotate(360deg); } }

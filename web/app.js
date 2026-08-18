@@ -576,6 +576,23 @@ function parseRunProgress(run) {
   return progress;
 }
 
+function normalizeRunProgress(run, progress) {
+  if (!["cancelled", "interrupted", "timed_out"].includes(run.status)) return progress;
+  const unfinished = ["pending", "checking", "uploading"];
+  const finishedAt = run.finished_at || progress.updatedAt;
+  return {
+    ...progress,
+    phase: run.status,
+    updatedAt: finishedAt,
+    targets: new Map([...progress.targets].map(([key, target]) => [
+      key,
+      unfinished.includes(target.status)
+        ? { ...target, status: run.status, at: finishedAt || target.at }
+        : target,
+    ])),
+  };
+}
+
 function formatDuration(milliseconds) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);
@@ -600,7 +617,7 @@ function updateRunTimers(root = document) {
 
 function targetIcon(status) {
   if (["success", "ready"].includes(status)) return "circle-check-big";
-  if (["failed", "unavailable", "cancelled", "timed_out"].includes(status)) return "circle-x";
+  if (["failed", "unavailable", "cancelled", "timed_out", "interrupted"].includes(status)) return "circle-x";
   if (status === "pending") return "circle-dashed";
   return "loader-circle";
 }
@@ -609,14 +626,14 @@ function renderOpenRun() {
   if (!state.openRunId || !$("#logDialog").open) return;
   const run = state.runs.find((item) => item.id === state.openRunId);
   if (!run) return;
-  const progress = parseRunProgress(run);
+  const progress = normalizeRunProgress(run, parseRunProgress(run));
   const plan = state.plans.find((item) => item.id === run.plan_id);
   const maxAttempts = plan?.retry?.max_attempts || Math.max(1, run.attempt);
   const active = ["running", "retrying"].includes(run.status);
   const status = run.status === "success" ? "success" : active ? "running" : run.status;
   const targets = [...progress.targets.values()];
   const processed = targets.filter((item) => !["pending", "checking", "uploading"].includes(item.status)).length;
-  const lastUpdated = progress.updatedAt || run.finished_at || run.started_at;
+  const lastUpdated = run.finished_at || progress.updatedAt || run.started_at;
   const overview = $("#runOverview");
   const signature = JSON.stringify({ language: state.language, status, runStatus: run.status, attempt: run.attempt, maxAttempts, phase: progress.phase, targets });
   if (overview.dataset.signature !== signature) overview.innerHTML = `<div class="run-summary ${status}"><span class="run-state-icon">${icon(status === "success" ? "circle-check-big" : status === "running" ? "loader-circle" : "circle-x")}</span><div><small>${escapeHtml(t("runStatus"))}</small><strong>${escapeHtml(t(run.status))}</strong><span>${escapeHtml(t("attemptLabel").replace("{current}", run.attempt).replace("{total}", maxAttempts))}</span><span class="run-timing"><span data-duration-start="${escapeHtml(run.started_at)}" ${status === "running" ? "" : `data-duration-end="${escapeHtml(run.finished_at || lastUpdated)}"`} data-duration-key="${status === "running" ? "elapsed" : "duration"}"></span><i aria-hidden="true"></i><span data-relative-at="${escapeHtml(lastUpdated)}"></span></span></div><div class="run-phase" role="status"><small>${escapeHtml(t("phase"))}</small><strong>${escapeHtml(t(progress.phase))}</strong></div></div>
