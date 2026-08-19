@@ -388,7 +388,11 @@ fn load_or_create_key(path: &str, key_override: Option<&str>) -> anyhow::Result<
                 bail!("plan encryption key must be owned by the current user");
             }
             if metadata.permissions().mode() & 0o077 != 0 {
-                bail!("plan encryption key permissions must be 0600");
+                // A copied key may lose its restrictive mode (for example when
+                // moved through a filesystem or archive). Tighten it before
+                // reading instead of making migration depend on manual chmod.
+                fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+                    .context("set plan encryption key permissions to 0600")?;
             }
         }
         return decode_key(fs::read_to_string(path)?.trim()).context("read plan encryption key");
@@ -445,6 +449,26 @@ mod tests {
         assert!(store.seed_once(&plans).await.unwrap());
         assert!(!store.seed_once(&plans).await.unwrap());
         assert_eq!(store.list_plans().await.unwrap().len(), plans.len());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn startup_repairs_copied_key_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let key_path = directory.path().join("key");
+        fs::write(&key_path, STANDARD_NO_PAD.encode([7_u8; 32])).unwrap();
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        Store::connect("sqlite::memory:", key_path.to_str().unwrap(), None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fs::symlink_metadata(key_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[tokio::test]
