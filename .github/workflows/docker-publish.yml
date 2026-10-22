@@ -21,6 +21,9 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
     outputs:
       release_tag: ${{ steps.release.outputs.tag }}
       source_sha: ${{ steps.release.outputs.sha }}
