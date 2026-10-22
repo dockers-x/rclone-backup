@@ -3,28 +3,43 @@ name: Container images
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: container-${{ github.ref_name }}
+  group: container-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      release_tag: ${{ steps.release.outputs.tag }}
+      source_sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
       - name: Verify release tag
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           version="$(sed -n '/^\[package\]/,/^\[/ s/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
           test -n "${version}"
-          test "${GITHUB_REF_NAME}" = "v${version}"
+          test "${RELEASE_TAG}" = "v${version}"
+          echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.99.1
@@ -61,10 +76,12 @@ jobs:
             platform_tag: arm64
     env:
       BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      SOURCE_SHA: ${{ needs.test.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: refs/tags/${{ needs.test.outputs.release_tag }}
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -83,12 +100,12 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            docker.io/czyt/rclone-backup:build-${{ github.sha }}-${{ env.BUILD_ID }}-${{ matrix.platform_tag }}
-            ghcr.io/dockers-x/rclone-backup:build-${{ github.sha }}-${{ env.BUILD_ID }}-${{ matrix.platform_tag }}
+            docker.io/czyt/rclone-backup:build-${{ env.SOURCE_SHA }}-${{ env.BUILD_ID }}-${{ matrix.platform_tag }}
+            ghcr.io/dockers-x/rclone-backup:build-${{ env.SOURCE_SHA }}-${{ env.BUILD_ID }}-${{ matrix.platform_tag }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.test.outputs.release_tag }}
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
           cache-from: type=gha,scope=rclone-backup-${{ matrix.platform_tag }}
           cache-to: type=gha,mode=max,scope=rclone-backup-${{ matrix.platform_tag }}
           provenance: true
@@ -104,6 +121,8 @@ jobs:
       packages: write
     env:
       BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RELEASE_TAG: ${{ needs.test.outputs.release_tag }}
+      SOURCE_SHA: ${{ needs.test.outputs.source_sha }}
     steps:
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -119,7 +138,7 @@ jobs:
       - name: Create and verify manifests
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           major_minor="${version%.*}"
           major="${version%%.*}"
           images=(
@@ -132,8 +151,8 @@ jobs:
               --tag "${image}:${version}" \
               --tag "${image}:${major_minor}" \
               --tag "${image}:${major}" \
-              "${image}:build-${GITHUB_SHA}-${BUILD_ID}-amd64" \
-              "${image}:build-${GITHUB_SHA}-${BUILD_ID}-arm64"
+              "${image}:build-${SOURCE_SHA}-${BUILD_ID}-amd64" \
+              "${image}:build-${SOURCE_SHA}-${BUILD_ID}-arm64"
             docker buildx imagetools inspect --raw "${image}:${version}" \
               | jq -e '
                   [.manifests[]?.platform

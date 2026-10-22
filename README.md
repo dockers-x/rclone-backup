@@ -143,6 +143,8 @@ The container image bundles rclone 1.75.2. Releases publish `linux/amd64` and `l
 
 Before tagging a release, update every workspace package version and the image examples in this README and `docker-compose.yml`. Run `cargo update --workspace --offline` to synchronize `Cargo.lock` without upgrading registry dependencies, then run the checks above and `node --test web/app.test.js`. Commit the synchronized files before pushing the matching `vX.Y.Z` tag.
 
+To rebuild an existing release tag without moving it, run `gh workflow run docker-publish.yml --ref main -f release_tag=vX.Y.Z`. The workflow checks out that tag, verifies its version, and labels the images with its actual commit.
+
 ## License
 
 [MIT](LICENSE)
