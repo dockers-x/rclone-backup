@@ -414,19 +414,19 @@ async fn require_auth(
     headers: HeaderMap,
     request: Request,
     next: Next,
-) -> Result<Response, Response> {
+) -> Response {
     if matches!(
         *request.method(),
         axum::http::Method::POST | axum::http::Method::PUT | axum::http::Method::DELETE
     ) && !same_origin_or_non_browser(&headers)
     {
-        return Err(Response::builder()
+        return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Body::from("cross-origin request rejected"))
-            .unwrap());
+            .unwrap();
     }
     let Some((expected_user, expected_password)) = &state.public_auth else {
-        return Ok(next.run(request).await);
+        return next.run(request).await;
     };
     let valid = headers
         .get(header::AUTHORIZATION)
@@ -447,16 +447,16 @@ async fn require_auth(
                     .into()
         });
     if valid {
-        Ok(next.run(request).await)
+        next.run(request).await
     } else {
-        Err(Response::builder()
+        Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(
                 header::WWW_AUTHENTICATE,
                 "Basic realm=\"Rclone Backup\", charset=\"UTF-8\"",
             )
             .body(Body::from("authentication required"))
-            .unwrap())
+            .unwrap()
     }
 }
 

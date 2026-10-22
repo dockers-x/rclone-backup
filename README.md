@@ -26,7 +26,7 @@ docker run -d \
   -p 127.0.0.1:8080:8080 \
   -v rclone-backup-data:/config \
   -v /path/to/backup:/data:ro \
-  czyt/rclone-backup:2.2.2
+  czyt/rclone-backup:2.2.4
 ```
 
 Open `http://127.0.0.1:8080`. On a fresh installation the service displays the storage wizard and remains running. Scheduled and manual backups stay locked until at least one working rclone alias exists.
@@ -130,16 +130,18 @@ Keep the `/config` volume backed up. It contains rclone accounts, backup plans, 
 
 ## Development
 
-Requires stable Rust. Runtime backup execution also needs `rclone`, `7z`, `cp`, `curl`, and `mail` for the corresponding features.
+Requires stable Rust; release builds and CI use Rust 1.99.1. Runtime backup execution also needs `rclone`, `7z`, `cp`, `curl`, and `mail` for the corresponding features.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets --all-features
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --all-features --locked
 cargo run -- serve
 ```
 
-The container image bundles rclone 1.75.0. Releases publish `linux/amd64` and `linux/arm64` images to Docker Hub and GHCR.
+The container image bundles rclone 1.75.2. Releases publish `linux/amd64` and `linux/arm64` images to Docker Hub and GHCR.
+
+Before tagging a release, update every workspace package version and the image examples in this README and `docker-compose.yml`. Run `cargo update --workspace --offline` to synchronize `Cargo.lock` without upgrading registry dependencies, then run the checks above and `node --test web/app.test.js`. Commit the synchronized files before pushing the matching `vX.Y.Z` tag.
 
 ## License
 

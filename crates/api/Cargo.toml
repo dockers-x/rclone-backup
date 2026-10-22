@@ -1,6 +1,6 @@
 [package]
 name = "rclone-backup-api"
-version = "2.2.2"
+version = "2.2.4"
 edition = "2024"
 license = "MIT"
 
