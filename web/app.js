@@ -29,7 +29,7 @@ const translations = {
     cancel: "取消", close: "关闭", remove: "删除", themeToggle: "切换主题", switchLanguage: "切换语言", menuOpen: "打开菜单", menuClose: "关闭菜单", primaryNavigation: "主导航", metrics: "指标", savePlan: "保存方案", runLog: "运行日志", runProgress: "运行进度", technicalLog: "技术日志", label: "名称", path: "绝对路径",
     remoteName: "Rclone 远端名", remoteDir: "远端目录", edit: "编辑", runNow: "立即运行", delete: "删除",
     source: "数据源", target: "目标", retry: "重试", attempts: "次", enabledBadge: "已启用", disabledBadge: "已停用",
-    manual: "手动", scheduleTrigger: "定时", cli: "命令行", noRuns: "暂无运行记录", viewLog: "查看日志",
+    manual: "手动", scheduleTrigger: "定时", cli: "命令行", noRuns: "暂无运行记录", loadingRun: "正在加载运行详情…", viewLog: "查看日志",
     saveSuccess: "方案已保存", deleteConfirm: "确定删除这个方案吗？运行历史会保留。", deleteSuccess: "方案已删除",
     runQueued: "备份任务已加入队列", loadError: "加载失败", formInvalid: "请检查表单中的必填字段。",
     rcloneWaiting: "等待配置存储", rcloneWaitingHint: "服务会保持运行，但在检测到至少一个 rclone 远端前不会启动任何备份任务。", rcloneQuarantined: "rclone 状态需要恢复", rcloneQuarantinedHint: "上一个任务的停止状态无法确认。为保护备份源和并发边界，新任务已暂停；请重启服务后再运行。", restartRequired: "需要重启服务",
@@ -77,7 +77,7 @@ const translations = {
     cancel: "Cancel", close: "Close", remove: "Remove", themeToggle: "Change theme", switchLanguage: "Switch language", menuOpen: "Open menu", menuClose: "Close menu", primaryNavigation: "Primary navigation", metrics: "Metrics", savePlan: "Save plan", runLog: "Run log", runProgress: "Run progress", technicalLog: "Technical log", label: "Name", path: "Absolute path",
     remoteName: "Rclone remote", remoteDir: "Remote directory", edit: "Edit", runNow: "Run now", delete: "Delete",
     source: "Sources", target: "Targets", retry: "Retry", attempts: "attempts", enabledBadge: "Enabled", disabledBadge: "Disabled",
-    manual: "Manual", scheduleTrigger: "Scheduled", cli: "CLI", noRuns: "No runs yet", viewLog: "View log",
+    manual: "Manual", scheduleTrigger: "Scheduled", cli: "CLI", noRuns: "No runs yet", loadingRun: "Loading run details…", viewLog: "View log",
     saveSuccess: "Plan saved", deleteConfirm: "Delete this plan? Run history will be kept.", deleteSuccess: "Plan deleted",
     runQueued: "Backup run queued", loadError: "Failed to load", formInvalid: "Check the required fields in the form.",
     rcloneWaiting: "Waiting for storage setup", rcloneWaitingHint: "The service stays online, but no backup can start until at least one rclone remote is detected.", rcloneQuarantined: "rclone state needs recovery", rcloneQuarantinedHint: "The previous job's stop state could not be confirmed. New backups are paused to protect the source and concurrency boundary; restart the service before running again.", restartRequired: "Service restart required",
@@ -103,9 +103,10 @@ const translations = {
 const state = {
   language: localStorage.getItem("language") || (navigator.language.startsWith("zh") ? "zh" : "en"),
   theme: localStorage.getItem("theme") || "system",
-  plans: [], runs: [], remotes: [], notifications: null, notificationTargets: [], notificationTemplates: [], expandedNotificationId: null, selectedTemplateId: "", selectedTemplateEvent: "success", status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, remoteVisibleOptions: new Set(), openRunId: null, page: "plans",
+  plans: [], runs: [], metrics: null, remotes: [], notifications: null, notificationTargets: [], notificationTemplates: [], expandedNotificationId: null, selectedTemplateId: "", selectedTemplateEvent: "success", status: null, editingId: null, providers: [], selectedProvider: null, remoteFlow: null, editingRemote: null, remoteVisibleOptions: new Set(), openRunId: null, openRun: null, page: "plans",
 };
 let providerComboboxSequence = 0;
+let runDetailsRequest = 0;
 
 const pageRoutes = {
   plans: { path: "/plans", title: "backupPlans" },
@@ -116,6 +117,7 @@ const pageRoutes = {
 };
 const pageNames = new Set(Object.keys(pageRoutes));
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const mobileNavigation = window.matchMedia("(max-width: 980px)");
 let navigationPointer = null;
 let pageAnimation = null;
 
@@ -139,7 +141,7 @@ function applyFrameworkComponents(root = document) {
     } else node.classList.add("sui-input");
   });
   $$("select", root).forEach((node) => node.classList.add("sui-select"));
-  $$("svg:not(.icon-sprite)", root).forEach((node) => node.classList.add("sui-icon"));
+  $$("svg:not(.icon-sprite)", root).forEach((node) => { node.classList.add("sui-icon"); node.setAttribute("aria-hidden", "true"); });
 }
 function escapeHtml(value = "") {
   const node = document.createElement("div");
@@ -238,6 +240,7 @@ function initializeNavigation() {
 
 function setMenuOpen(open) {
   document.body.classList.toggle("menu-open", open);
+  $("#primarySidebar").inert = mobileNavigation.matches && !open;
   $("#menuButton").setAttribute("aria-expanded", String(open));
   $("#menuButton").setAttribute("aria-label", t(open ? "menuClose" : "menuOpen"));
 }
@@ -255,10 +258,10 @@ function toast(message, error = false) {
 
 async function loadAll() {
   try {
-    const [plans, runs, status, health, remoteResponse, notifications] = await Promise.all([
-      api("/api/plans"), api("/api/runs?limit=50"), api("/api/status"), api("/api/health"), api("/api/rclone/remotes"), api("/api/notifications"),
+    const [plans, runs, metrics, status, health, remoteResponse, notifications] = await Promise.all([
+      api("/api/plans"), api("/api/runs?limit=50&include_logs=false"), api("/api/metrics"), api("/api/status"), api("/api/health"), api("/api/rclone/remotes"), api("/api/notifications"),
     ]);
-    Object.assign(state, { plans, runs, status, notifications, remotes: remoteResponse.remotes || [] });
+    Object.assign(state, { plans, runs, metrics, status, notifications, remotes: remoteResponse.remotes || [] });
     state.notificationTargets = structuredClone(notifications.config?.targets || []);
     state.notificationTemplates = structuredClone(notifications.config?.templates || []);
     if (state.selectedTemplateId && !state.notificationTemplates.some((template) => template.id === state.selectedTemplateId)) state.selectedTemplateId = "";
@@ -498,6 +501,7 @@ function renderStatus() {
   $(".hero-status span:last-child").textContent = quarantined ? t("restartRequired") : ready ? t("schedulerActive") : t("schedulerWaiting");
   $(".hero-status .pulse").style.background = ready ? "var(--success)" : "var(--accent)";
   $(".sidebar-foot > span:nth-child(2)").textContent = quarantined ? t("restartRequired") : ready ? t("serviceOnline") : t("rcloneWaiting");
+  $$(".plan-card [data-action='run']").forEach((button) => { button.disabled = !ready || quarantined || button.getAttribute("aria-busy") === "true"; });
 }
 
 function renderMetrics() {
@@ -505,9 +509,8 @@ function renderMetrics() {
   const recent = state.runs.slice(0, 20);
   const successes = recent.filter((run) => run.status === "success").length;
   const complete = recent.filter((run) => ["success", "failed"].includes(run.status)).length;
-  const last24 = state.runs.filter((run) => run.status === "success" && Date.now() - Date.parse(run.started_at) < 86400000).length;
   $("#activeCount").textContent = active;
-  $("#successCount").textContent = last24;
+  $("#successCount").textContent = state.metrics?.successful_runs_24h ?? "—";
   $("#successRate").textContent = complete ? `${Math.round(successes / complete * 100)}%` : "—";
   $("#remoteCount").textContent = state.remotes.length;
 }
@@ -540,6 +543,8 @@ function renderPlans() {
 
 function renderRuns() {
   const list = $("#historyList");
+  const focusedRunId = document.activeElement?.matches("[data-action='log']")
+    ? document.activeElement.closest(".history-row")?.dataset.run : null;
   if (!state.runs.length) {
     list.innerHTML = `<div class="empty-state"><p>${t("noRuns")}</p></div>`;
     return;
@@ -548,6 +553,7 @@ function renderRuns() {
     <strong>${escapeHtml(run.plan_name)}</strong><time datetime="${run.started_at}">${new Intl.DateTimeFormat(state.language === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(run.started_at))}</time>
     <span class="trigger">${t(run.trigger === "schedule" ? "scheduleTrigger" : run.trigger)}</span><span class="badge ${run.status}">${escapeHtml(t(run.status))}</span>
     <button class="icon-button" data-action="log" aria-label="${t("viewLog")}">${icon("chevron")}</button></div>`).join("");
+  if (focusedRunId) $(`[data-run="${CSS.escape(focusedRunId)}"] [data-action="log"]`, list)?.focus({ preventScroll: true });
 }
 
 function parseRunProgress(run) {
@@ -622,10 +628,37 @@ function targetIcon(status) {
   return "loader-circle";
 }
 
+async function refreshOpenRun() {
+  const runId = state.openRunId;
+  if (!runId || !$("#logDialog").open) return;
+  const request = ++runDetailsRequest;
+  const run = await api(`/api/runs/${encodeURIComponent(runId)}`);
+  if (request !== runDetailsRequest || state.openRunId !== runId || !$("#logDialog").open) return;
+  state.openRun = run;
+  renderOpenRun();
+}
+
+async function openRun(runId) {
+  if (!runId) return;
+  state.openRunId = runId;
+  state.openRun = null;
+  $("#runOverview").innerHTML = `<p class="run-loading" role="status">${escapeHtml(t("loadingRun"))}</p>`;
+  delete $("#runOverview").dataset.signature;
+  $("#logContent").textContent = t("loadingRun");
+  $("#logDialog").showModal();
+  try { await refreshOpenRun(); }
+  catch (error) {
+    if (state.openRunId === runId && $("#logDialog").open) {
+      $("#runOverview").textContent = `${t("loadError")}: ${error.message}`;
+      toast(error.message, true);
+    }
+  }
+}
+
 function renderOpenRun() {
   if (!state.openRunId || !$("#logDialog").open) return;
-  const run = state.runs.find((item) => item.id === state.openRunId);
-  if (!run) return;
+  const run = state.openRun;
+  if (!run || run.id !== state.openRunId) return;
   const progress = normalizeRunProgress(run, parseRunProgress(run));
   const plan = state.plans.find((item) => item.id === run.plan_id);
   const maxAttempts = plan?.retry?.max_attempts || Math.max(1, run.attempt);
@@ -1268,7 +1301,11 @@ document.addEventListener("click", async (event) => {
     $("#templateError").hidden = true;
     render();
   }
-  if (button.id === "menuButton") setMenuOpen(!document.body.classList.contains("menu-open"));
+  if (button.id === "menuButton") {
+    const open = !document.body.classList.contains("menu-open");
+    setMenuOpen(open);
+    if (open && event.detail === 0) $(".nav-item", $("#primarySidebar")).focus();
+  }
   if (button.matches("[data-page-link]")) {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -1316,8 +1353,9 @@ document.addEventListener("click", async (event) => {
   if (card && action === "edit") openPlan(state.plans.find((plan) => plan.id === card.dataset.id));
   if (card && action === "run") {
     button.disabled = true;
-    try { const result = await api(`/api/plans/${card.dataset.id}/run`, { method: "POST" }); toast(t("runQueued")); await loadAll(); state.openRunId = result.run_id; $("#logDialog").showModal(); renderOpenRun(); }
-    catch (error) { toast(error.message, true); } finally { button.disabled = false; }
+    button.setAttribute("aria-busy", "true");
+    try { const result = await api(`/api/plans/${card.dataset.id}/run`, { method: "POST" }); toast(t("runQueued")); await loadAll(); await openRun(result.run_id); }
+    catch (error) { toast(error.message, true); } finally { button.removeAttribute("aria-busy"); button.disabled = !state.status?.rclone_ready || Boolean(state.status?.rclone_quarantined); }
   }
   if (card && action === "delete" && confirm(t("deleteConfirm"))) {
     try { await api(`/api/plans/${card.dataset.id}`, { method: "DELETE" }); toast(t("deleteSuccess")); await loadAll(); }
@@ -1325,7 +1363,7 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "log") {
     const run = state.runs.find((item) => item.id === button.closest(".history-row").dataset.run);
-    state.openRunId = run?.id || null; $("#logDialog").showModal(); renderOpenRun();
+    await openRun(run?.id);
   }
   if (action === "cancel-run") {
     button.disabled = true;
@@ -1334,6 +1372,7 @@ document.addEventListener("click", async (event) => {
       await api(`/api/runs/${encodeURIComponent(button.dataset.runId)}/cancel`, { method: "POST" });
       toast(t("cancelRequested"));
       await loadAll();
+      await refreshOpenRun();
     } catch (error) {
       toast(error.message, true);
       button.disabled = false;
@@ -1610,20 +1649,32 @@ $("#planForm").addEventListener("input", (event) => {
 $("#planForm").addEventListener("change", (event) => {
   if (["schedule_mode", "schedule_kind", "schedule_weekday"].includes(event.target.name)) updateScheduleBuilder();
 });
+$("#logDialog").addEventListener("close", () => {
+  state.openRunId = null;
+  state.openRun = null;
+  runDetailsRequest += 1;
+});
 $$("dialog").forEach((dialog) => dialog.addEventListener("click", (event) => {
   const rect = dialog.getBoundingClientRect();
   if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
 }));
 
+mobileNavigation.addEventListener("change", () => setMenuOpen(false));
+setMenuOpen(false);
 initializeNavigation();
 applyPreferences();
 loadAll();
 setInterval(async () => {
   if (document.visibilityState === "visible") {
     try {
-      state.status = await api("/api/status");
-      state.runs = await api("/api/runs?limit=50");
-      renderStatus(); renderMetrics(); renderRuns(); renderOpenRun();
+      const [status, runs, metrics] = await Promise.all([
+        api("/api/status"), api("/api/runs?limit=50&include_logs=false"), api("/api/metrics"),
+      ]);
+      const runsChanged = JSON.stringify(state.runs) !== JSON.stringify(runs);
+      Object.assign(state, { status, runs, metrics });
+      renderStatus(); renderMetrics();
+      if (runsChanged) renderRuns();
+      await refreshOpenRun();
     } catch {}
   }
 }, 5000);

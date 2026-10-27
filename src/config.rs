@@ -1,4 +1,8 @@
-use crate::model::*;
+use crate::model::{
+    ArchiveConfig, DEFAULT_REMOTE_CHECK_CONCURRENCY, DEFAULT_UPLOAD_CONCURRENCY, FolderSource,
+    MailConfig, NotificationConfig, PingConfig, Plan, PlanInput, RemoteConfig, RetentionPolicy,
+    RetryPolicy, ServerChanConfig,
+};
 use chrono::Utc;
 use std::{collections::HashMap, env, fs};
 use uuid::Uuid;
@@ -357,6 +361,7 @@ fn configured_site_name(value: Option<String>) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::NotificationTargetKind;
 
     #[test]
     fn legacy_defaults_validate() {

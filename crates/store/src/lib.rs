@@ -4,7 +4,7 @@ use aes_gcm::{
 };
 use anyhow::{Context, bail};
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rclone_backup_core::{GlobalNotificationSettings, NotificationConfig, Plan, RunRecord};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::{fs, path::Path, sync::Arc};
@@ -66,6 +66,12 @@ impl Store {
         )
         .execute(&self.pool)
         .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC)")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_runs_success_started ON runs(started_at DESC) WHERE status = 'success'")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -230,20 +236,60 @@ impl Store {
         plan_id: Option<Uuid>,
         limit: u32,
     ) -> anyhow::Result<Vec<RunRecord>> {
+        self.list_runs_with_log(plan_id, limit, true).await
+    }
+
+    pub async fn list_run_summaries(
+        &self,
+        plan_id: Option<Uuid>,
+        limit: u32,
+    ) -> anyhow::Result<Vec<RunRecord>> {
+        self.list_runs_with_log(plan_id, limit, false).await
+    }
+
+    async fn list_runs_with_log(
+        &self,
+        plan_id: Option<Uuid>,
+        limit: u32,
+        include_log: bool,
+    ) -> anyhow::Result<Vec<RunRecord>> {
         let limit = limit.clamp(1, 200);
         let rows: Vec<RunRow> = if let Some(id) = plan_id {
-            sqlx::query_as("SELECT id,plan_id,plan_name,trigger,status,attempt,started_at,finished_at,log FROM runs WHERE plan_id=? ORDER BY started_at DESC LIMIT ?")
+            sqlx::query_as("SELECT id,plan_id,plan_name,trigger,status,attempt,started_at,finished_at,CASE WHEN ? THEN log ELSE '' END FROM runs WHERE plan_id=? ORDER BY started_at DESC LIMIT ?")
+                .bind(include_log)
                 .bind(id.to_string())
                 .bind(limit)
                 .fetch_all(&self.pool)
                 .await?
         } else {
-            sqlx::query_as("SELECT id,plan_id,plan_name,trigger,status,attempt,started_at,finished_at,log FROM runs ORDER BY started_at DESC LIMIT ?")
+            sqlx::query_as("SELECT id,plan_id,plan_name,trigger,status,attempt,started_at,finished_at,CASE WHEN ? THEN log ELSE '' END FROM runs ORDER BY started_at DESC LIMIT ?")
+                .bind(include_log)
                 .bind(limit)
                 .fetch_all(&self.pool)
                 .await?
         };
         rows.into_iter().map(run_from_row).collect()
+    }
+
+    pub async fn get_run(&self, id: &str) -> anyhow::Result<Option<RunRecord>> {
+        let row: Option<RunRow> = sqlx::query_as("SELECT id,plan_id,plan_name,trigger,status,attempt,started_at,finished_at,log FROM runs WHERE id=?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(run_from_row).transpose()
+    }
+
+    pub async fn successful_runs_between(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> anyhow::Result<i64> {
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM runs WHERE status='success' AND started_at >= ? AND started_at <= ?")
+            .bind(start.to_rfc3339())
+            .bind(end.to_rfc3339())
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
     }
 
     fn encode_plan(&self, plan: &Plan) -> anyhow::Result<String> {
@@ -298,18 +344,21 @@ impl Store {
     }
 
     async fn encrypt_existing_plans(&self) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
         let rows: Vec<(String, String)> =
             sqlx::query_as("SELECT id, document FROM plans WHERE document NOT LIKE 'enc:v1:%'")
-                .fetch_all(&self.pool)
+                .fetch_all(&mut *tx)
                 .await?;
         for (id, document) in rows {
-            let plan: Plan = serde_json::from_str(&document).context("decode legacy plan")?;
+            let plan: Plan = serde_json::from_str(&document)
+                .with_context(|| format!("decode legacy plan {id}"))?;
             sqlx::query("UPDATE plans SET document=? WHERE id=?")
                 .bind(self.encode_plan(&plan)?)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
         }
+        tx.commit().await?;
         Ok(())
     }
 }
@@ -606,6 +655,137 @@ mod tests {
         config.ping.success_url = url.into();
         config.promote_legacy_targets();
         config.targets.remove(0)
+    }
+
+    #[tokio::test]
+    async fn legacy_plan_encryption_is_atomic_if_a_document_is_invalid() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::connect(
+            "sqlite::memory:",
+            directory.path().join("key").to_str().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
+        let now = Utc::now();
+        let plan = rclone_backup_core::PlanInput {
+            name: "legacy".into(),
+            enabled: true,
+            schedule: "5 * * * *".into(),
+            timezone: "UTC".into(),
+            sources: vec![],
+            archive: Default::default(),
+            remotes: vec![],
+            retention: Default::default(),
+            retry: Default::default(),
+            notifications: Default::default(),
+            rclone_flags: vec![],
+            remote_check_concurrency: rclone_backup_core::DEFAULT_REMOTE_CHECK_CONCURRENCY,
+            upload_concurrency: rclone_backup_core::DEFAULT_UPLOAD_CONCURRENCY,
+        }
+        .into_plan(Uuid::new_v4(), now);
+        let original = serde_json::to_string(&plan).unwrap();
+        for (id, document) in [("valid", original.as_str()), ("invalid", "not JSON")] {
+            sqlx::query("INSERT INTO plans(id,name,enabled,document,created_at,updated_at) VALUES(?, 'legacy', 1, ?, ?, ?)")
+                .bind(id).bind(document).bind(now.to_rfc3339()).bind(now.to_rfc3339())
+                .execute(&store.pool).await.unwrap();
+        }
+
+        assert!(store.encrypt_existing_plans().await.is_err());
+        let (document,): (String,) =
+            sqlx::query_as("SELECT document FROM plans WHERE id = 'valid'")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            document, original,
+            "a failed migration must roll back every converted plan"
+        );
+    }
+
+    #[tokio::test]
+    async fn global_history_sort_uses_started_at_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::connect(
+            "sqlite::memory:",
+            directory.path().join("key").to_str().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
+        let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+            "EXPLAIN QUERY PLAN SELECT id FROM runs ORDER BY started_at DESC LIMIT 50",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+        assert!(
+            plan.iter().any(|row| row.3.contains("idx_runs_started")),
+            "query plan: {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|row| row.3.contains("TEMP B-TREE")),
+            "query plan: {plan:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn history_summaries_omit_logs_without_changing_existing_history_or_details() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::connect(
+            "sqlite::memory:",
+            directory.path().join("key").to_str().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
+        let now = Utc::now().to_rfc3339();
+        let plan_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO runs(id,plan_id,plan_name,trigger,status,attempt,started_at,log) VALUES('run-1',?,'Backup','manual','success',1,?,'large log')")
+            .bind(plan_id.to_string()).bind(now).execute(&store.pool).await.unwrap();
+        let summaries = store.list_run_summaries(Some(plan_id), 50).await.unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].log, "");
+        assert_eq!(store.list_runs(None, 50).await.unwrap()[0].log, "large log");
+        assert_eq!(
+            store.get_run("run-1").await.unwrap().unwrap().log,
+            "large log"
+        );
+        assert!(store.get_run("missing").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn successful_run_count_covers_the_complete_requested_window() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::connect(
+            "sqlite::memory:",
+            directory.path().join("key").to_str().unwrap(),
+            None,
+        )
+        .await
+        .unwrap();
+        let now = Utc::now();
+        for index in 0..55 {
+            sqlx::query("INSERT INTO runs(id,plan_id,plan_name,trigger,status,attempt,started_at,log) VALUES(?, 'plan', 'Backup', 'schedule', 'success', 1, ?, '')")
+                .bind(format!("success-{index}"))
+                .bind((now - chrono::Duration::minutes(index)).to_rfc3339())
+                .execute(&store.pool).await.unwrap();
+        }
+        for (id, status, time) in [
+            ("old", "success", now - chrono::Duration::hours(25)),
+            ("future", "success", now + chrono::Duration::minutes(1)),
+            ("failed", "failed", now - chrono::Duration::minutes(1)),
+        ] {
+            sqlx::query("INSERT INTO runs(id,plan_id,plan_name,trigger,status,attempt,started_at,log) VALUES(?, 'plan', 'Backup', 'schedule', ?, 1, ?, '')")
+                .bind(id).bind(status).bind(time.to_rfc3339()).execute(&store.pool).await.unwrap();
+        }
+        assert_eq!(
+            store
+                .successful_runs_between(now - chrono::Duration::hours(24), now)
+                .await
+                .unwrap(),
+            55
+        );
     }
 
     #[test]

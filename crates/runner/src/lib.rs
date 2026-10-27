@@ -1,7 +1,11 @@
 use anyhow::{Context, anyhow, bail};
 use chrono::{Local, Utc};
 use chrono_tz::Tz;
-use rclone_backup_core::*;
+use rclone_backup_core::{
+    ArchiveConfig, DEFAULT_REMOTE_CHECK_CONCURRENCY, DEFAULT_UPLOAD_CONCURRENCY, FolderSource,
+    MAX_REMOTE_CHECK_CONCURRENCY, MAX_UPLOAD_CONCURRENCY, NotificationConfig,
+    NotificationTargetKind, Plan, REDACTED, RemoteConfig, RetentionPolicy, RetryPolicy, RunRecord,
+};
 use rclone_backup_rclone::{
     RcloneRc, command_cancellation_unconfirmed, command_cancelled, command_timed_out,
 };
@@ -702,7 +706,7 @@ impl Runner {
             log,
         )
         .await?;
-        self.ensure_workspace_outside_sources(plan, run_dir)?;
+        self.ensure_workspace_outside_sources(plan, run_dir).await?;
         self.check_remotes(plan, run.id, run.number, run.control.clone(), log)
             .await?;
         run.control.ensure_running()?;
@@ -719,7 +723,7 @@ impl Runner {
                 }
             })
             .collect::<String>();
-        let available_sources = available_sources(plan, log);
+        let available_sources = available_sources(plan, log).await;
         if available_sources.is_empty() {
             bail!("none of the configured source directories exist");
         }
@@ -1153,10 +1157,17 @@ impl Runner {
         Ok(())
     }
 
-    fn ensure_workspace_outside_sources(&self, plan: &Plan, run_dir: &Path) -> anyhow::Result<()> {
-        let run_dir = std::fs::canonicalize(run_dir).context("resolve working directory")?;
+    async fn ensure_workspace_outside_sources(
+        &self,
+        plan: &Plan,
+        run_dir: &Path,
+    ) -> anyhow::Result<()> {
+        let run_dir = fs::canonicalize(run_dir)
+            .await
+            .context("resolve working directory")?;
         for source in &plan.sources {
-            let source_path = std::fs::canonicalize(&source.path)
+            let source_path = fs::canonicalize(&source.path)
+                .await
                 .with_context(|| format!("resolve source {}", source.path))?;
             if run_dir.starts_with(source_path) {
                 bail!(
@@ -1206,18 +1217,19 @@ fn archive_prefix(plan: &Plan) -> String {
     format!("{}-{}-", safe_name(&plan.name), &id[..8])
 }
 
-fn available_sources<'a>(plan: &'a Plan, log: &mut LogBuffer) -> Vec<&'a FolderSource> {
-    plan.sources
-        .iter()
-        .filter(|source| {
-            if !Path::new(&source.path).is_dir() {
-                log.line(format!("Source {} does not exist; skipped.", source.path));
-                false
-            } else {
-                true
-            }
-        })
-        .collect()
+async fn available_sources<'a>(plan: &'a Plan, log: &mut LogBuffer) -> Vec<&'a FolderSource> {
+    let mut available = Vec::new();
+    for source in &plan.sources {
+        if fs::metadata(&source.path)
+            .await
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
+            available.push(source);
+        } else {
+            log.line(format!("Source {} does not exist; skipped.", source.path));
+        }
+    }
+    available
 }
 
 async fn stage_sources(
@@ -1835,6 +1847,7 @@ impl LogBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rclone_backup_core::smtp_server_from_options;
 
     #[test]
     fn active_run_can_be_cancelled_by_persistent_run_id() {

@@ -52,6 +52,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/docs", get(api_docs))
         .route("/api/openapi.json", get(openapi))
         .route("/api/status", get(status))
+        .route("/api/metrics", get(metrics))
         .route("/api/rclone/providers", get(rclone_providers))
         .route(
             "/api/rclone/remotes",
@@ -82,6 +83,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/notifications/test", post(test_notification))
         .route("/api/runs", get(list_runs))
+        .route("/api/runs/{id}", get(get_run))
         .route("/api/runs/{id}/cancel", post(cancel_run))
         .fallback(not_found)
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
@@ -199,6 +201,21 @@ async fn status(State(state): State<AppState>) -> Json<Status> {
         authentication_enabled: state.public_auth.is_some(),
         rclone_stats: state.runner.rclone_stats().await,
     })
+}
+
+#[derive(Serialize)]
+struct Metrics {
+    successful_runs_24h: i64,
+}
+
+async fn metrics(State(state): State<AppState>) -> ApiResult<Json<Metrics>> {
+    let now = Utc::now();
+    Ok(Json(Metrics {
+        successful_runs_24h: state
+            .store
+            .successful_runs_between(now - chrono::Duration::hours(24), now)
+            .await?,
+    }))
 }
 
 async fn rclone_providers(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
@@ -494,6 +511,7 @@ async fn openapi() -> impl IntoResponse {
         "paths": {
             "/api/health": { "get": { "summary": "Liveness", "responses": { "200": { "description": "Service is alive" }}}},
             "/api/status": { "get": { "summary": "Service, rclone readiness, and transfer status", "responses": { "200": { "description": "Current status" }}}},
+            "/api/metrics": { "get": { "summary": "Dashboard statistics across all run history", "responses": { "200": { "description": "Successful runs in the last 24 hours" }}}},
             "/api/rclone/providers": { "get": { "summary": "List provider schemas from the bundled rclone", "responses": { "200": { "description": "Provider schemas" }}}},
             "/api/rclone/remotes": {
                 "get": { "summary": "List configured rclone aliases", "responses": { "200": { "description": "Aliases" }}},
@@ -519,7 +537,8 @@ async fn openapi() -> impl IntoResponse {
             },
             "/api/notification-templates": { "put": { "summary": "Save the reusable notification template library", "responses": { "200": { "description": "Saved" }, "422": { "description": "Validation or reference error" }}}},
             "/api/notifications/test": { "post": { "summary": "Send a channel test using global notification settings", "responses": { "200": { "description": "Delivered" }, "422": { "description": "Validation or delivery error" }}}},
-            "/api/runs": { "get": { "summary": "List persistent run history", "responses": { "200": { "description": "Runs" }}}},
+            "/api/runs": { "get": { "summary": "List persistent run history", "parameters": [{ "name": "include_logs", "in": "query", "required": false, "schema": { "type": "boolean", "default": true }, "description": "Set to false to omit log contents from the list" }], "responses": { "200": { "description": "Runs" }}}},
+            "/api/runs/{id}": { "get": { "summary": "Read one run including its full log", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Run details" }, "404": { "description": "Run not found" }}}},
             "/api/runs/{id}/cancel": { "post": { "summary": "Cancel an active backup run", "responses": { "202": { "description": "Cancellation requested" }, "404": { "description": "Run is not active" }}}}
         }
     }))
@@ -640,16 +659,31 @@ async fn run_plan(
 struct RunQuery {
     plan_id: Option<Uuid>,
     limit: Option<u32>,
+    include_logs: Option<bool>,
 }
 async fn list_runs(
     State(state): State<AppState>,
     Query(query): Query<RunQuery>,
 ) -> ApiResult<Json<Vec<RunRecord>>> {
+    let limit = query.limit.unwrap_or(50);
+    let runs = if query.include_logs.unwrap_or(true) {
+        state.store.list_runs(query.plan_id, limit).await?
+    } else {
+        state.store.list_run_summaries(query.plan_id, limit).await?
+    };
+    Ok(Json(runs))
+}
+
+async fn get_run(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<RunRecord>> {
     Ok(Json(
         state
             .store
-            .list_runs(query.plan_id, query.limit.unwrap_or(50))
-            .await?,
+            .get_run(&id)
+            .await?
+            .ok_or_else(ApiError::not_found)?,
     ))
 }
 
