@@ -31,6 +31,7 @@ import {
   ErrorNotice,
   Loading,
   Confirm,
+  useDialogFocus,
 } from "./components/ui";
 import { translations } from "./lib/i18n";
 import { api } from "./lib/api";
@@ -474,6 +475,8 @@ function BadgeStatus({ ready }) {
 }
 import * as Dialog from "@radix-ui/react-dialog";
 function ModalNav({ children, onClose, title, closeLabel }) {
+  const focus = useDialogFocus();
+  const initialPath = useRef(location.pathname);
   return (
     <Dialog.Root
       open
@@ -483,7 +486,16 @@ function ModalNav({ children, onClose, title, closeLabel }) {
     >
       <Dialog.Portal>
         <Dialog.Overlay className="modal-overlay" />
-        <Dialog.Content className="mobile-sidebar">
+        <Dialog.Content
+          {...focus}
+          onCloseAutoFocus={(event) => {
+            if (location.pathname !== initialPath.current) {
+              event.preventDefault();
+              document.querySelector("main h1")?.focus();
+            } else focus.onCloseAutoFocus(event);
+          }}
+          className="mobile-sidebar"
+        >
           <Dialog.Title className="sr-only">{title}</Dialog.Title>
           <Dialog.Description className="sr-only">{title}</Dialog.Description>
           <Dialog.Close asChild>

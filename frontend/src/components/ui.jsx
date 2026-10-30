@@ -4,6 +4,7 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useRef,
   useState,
 } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -135,6 +136,26 @@ export function Tabs({ tabs, value, onChange, label, panels }) {
     />
   );
 }
+// These dialogs open from application state rather than Radix Trigger nodes.
+// Capture the opener before portal inputs with autoFocus mount.
+export function useDialogFocus() {
+  const opener = useRef(document.activeElement);
+  return {
+    onCloseAutoFocus(event) {
+      event.preventDefault();
+      const target = opener.current;
+      if (
+        target instanceof HTMLElement &&
+        target.isConnected &&
+        !target.closest("[hidden]")
+      ) {
+        target.focus();
+      } else {
+        document.querySelector("main h1")?.focus();
+      }
+    },
+  };
+}
 export function Modal({
   title,
   description,
@@ -144,6 +165,7 @@ export function Modal({
   footer,
   closeLabel = "Close",
 }) {
+  const focus = useDialogFocus();
   return (
     <Dialog.Root
       open
@@ -154,6 +176,7 @@ export function Modal({
       <Dialog.Portal>
         <Dialog.Overlay className="modal-overlay" />
         <Dialog.Content
+          {...focus}
           className={`modal-content ${wide ? "wide" : ""}`}
           onPointerDownOutside={(e) => e.preventDefault()}
         >
@@ -180,6 +203,7 @@ export function Modal({
   );
 }
 export function Confirm({ title, description, onConfirm, onClose, t }) {
+  const focus = useDialogFocus();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   return (
@@ -191,7 +215,10 @@ export function Confirm({ title, description, onConfirm, onClose, t }) {
     >
       <AlertDialog.Portal>
         <AlertDialog.Overlay className="modal-overlay" />
-        <AlertDialog.Content className="modal-content confirm-dialog">
+        <AlertDialog.Content
+          {...focus}
+          className="modal-content confirm-dialog"
+        >
           <AlertDialog.Title>{title}</AlertDialog.Title>
           <AlertDialog.Description>{description}</AlertDialog.Description>
           <ErrorNotice>{error}</ErrorNotice>

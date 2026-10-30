@@ -35,7 +35,7 @@ const responses = {
     rclone_quarantined: false,
     authentication_enabled: true,
   },
-  "/api/health": { version: "2.3.0", site_name: "Rclone Backup" },
+  "/api/health": { version: "2.3.1", site_name: "Rclone Backup" },
   "/api/plans": [plan],
   "/api/runs?include_logs=false": [],
   "/api/rclone/remotes": { remotes: [{ name: "local", type: "local" }] },
@@ -58,7 +58,7 @@ it("uses the complete 24-hour count and renders real plan data", async () => {
   render(<App />);
   await screen.findByText("Home backup");
   expect(screen.getByText("55")).toBeTruthy();
-  expect(screen.getByText("v2.3.0")).toBeTruthy();
+  expect(screen.getByText("v2.3.1")).toBeTruthy();
 });
 it("switches and persists all four styles, language and theme", async () => {
   const user = userEvent.setup();
@@ -188,4 +188,24 @@ it("keeps schema-unknown remote values editable and secrets masked", async () =>
   await user.click(screen.getByRole("button", { name: "Edit custom" }));
   expect((await screen.findByLabelText("legacy_option")).value).toBe("kept");
   expect(screen.getByLabelText("headers").type).toBe("password");
+});
+
+it("returns focus to the opener after closing a plan dialog with Escape", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText("Home backup");
+  const opener = screen.getByRole("button", { name: "Edit Home backup" });
+  await user.click(opener);
+  await screen.findByRole("dialog");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(document.activeElement).toBe(opener));
+});
+it("returns focus to the delete button after cancelling confirmation", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText("Home backup");
+  const opener = screen.getByRole("button", { name: "Delete Home backup" });
+  await user.click(opener);
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(document.activeElement).toBe(opener));
 });
