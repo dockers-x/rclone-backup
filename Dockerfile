@@ -1,3 +1,10 @@
+FROM node:24-alpine AS frontend
+WORKDIR /web
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
 FROM rust:1.99.1-alpine AS builder
 
 WORKDIR /src
@@ -6,6 +13,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY src ./src
 COPY web ./web
+COPY --from=frontend /web/dist ./web/dist
 RUN cargo build --locked --release -p rclone-backup
 
 FROM rclone/rclone:1.75.2

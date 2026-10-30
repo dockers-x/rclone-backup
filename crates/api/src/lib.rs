@@ -46,7 +46,6 @@ pub fn router(state: AppState) -> Router {
         .iter()
         .fold(Router::new(), |router, path| router.route(path, get(index)))
         .route("/app.css", get(css))
-        .route("/sashimi.css", get(sashimi_css))
         .route("/app.js", get(js))
         .route("/favicon.svg", get(favicon))
         .route("/api/docs", get(api_docs))
@@ -104,33 +103,33 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn index(State(state): State<AppState>) -> impl IntoResponse {
-    let html = render_index_html(&state.site_name);
+    let nonce = Uuid::new_v4().simple().to_string();
+    let html = render_index_html(&state.site_name, &nonce);
+    let policy = format!(
+        "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{nonce}'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    );
     Response::builder()
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(header::CACHE_CONTROL, "no-cache")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CONTENT_SECURITY_POLICY, policy)
         .body(Body::from(html))
         .unwrap()
 }
-fn render_index_html(site_name: &str) -> String {
-    include_str!("../../../web/index.html")
+fn render_index_html(site_name: &str, nonce: &str) -> String {
+    include_str!("../../../web/dist/index.html")
+        .replace("{{CSP_NONCE}}", nonce)
         .replace("{{SITE_NAME}}", &escape_html(site_name))
         .replace("{{ASSET_VERSION}}", env!("CARGO_PKG_VERSION"))
 }
 async fn css() -> impl IntoResponse {
     static_asset(
-        include_str!("../../../web/app.css"),
-        "text/css; charset=utf-8",
-    )
-}
-async fn sashimi_css() -> impl IntoResponse {
-    static_asset(
-        include_str!("../../../web/sashimi.css"),
+        include_str!("../../../web/dist/app.css"),
         "text/css; charset=utf-8",
     )
 }
 async fn js() -> impl IntoResponse {
     static_asset(
-        include_str!("../../../web/app.js"),
+        include_str!("../../../web/dist/app.js"),
         "text/javascript; charset=utf-8",
     )
 }
@@ -1016,16 +1015,17 @@ mod tests {
 
     #[test]
     fn index_versions_frontend_assets_with_the_build_version() {
-        let html = super::render_index_html("Backup");
+        let html = super::render_index_html("Backup", "test-nonce");
         let version = env!("CARGO_PKG_VERSION");
 
-        assert!(html.contains(&format!("/sashimi.css?v={version}-1")));
-        assert!(html.contains(&format!("/app.css?v={version}-3")));
-        assert!(html.contains(&format!("/app.js?v={version}-3")));
+        assert!(html.contains(&format!("/app.css?v={version}")));
+        assert!(html.contains(&format!("/app.js?v={version}")));
         assert!(html.contains("href=\"/favicon.svg\""));
         assert!(!html.contains("cdn.jsdelivr.net"));
-        assert!(include_str!("../../../web/sashimi.css").contains(".sui-progress"));
+        assert!(html.contains("id=\"root\""));
         assert!(!html.contains("{{ASSET_VERSION}}"));
+        assert!(html.contains("name=\"csp-nonce\" content=\"test-nonce\""));
+        assert!(!html.contains("{{CSP_NONCE}}"));
     }
 
     #[test]

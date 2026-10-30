@@ -26,7 +26,7 @@ docker run -d \
   -p 127.0.0.1:8080:8080 \
   -v rclone-backup-data:/config \
   -v /path/to/backup:/data:ro \
-  czyt/rclone-backup:2.2.6
+  czyt/rclone-backup:2.3.0
 ```
 
 Open `http://127.0.0.1:8080`. On a fresh installation the service displays the storage wizard and remains running. Scheduled and manual backups stay locked until at least one working rclone alias exists.
@@ -141,10 +141,24 @@ cargo run -- serve
 
 The container image bundles rclone 1.75.2. Releases publish `linux/amd64` and `linux/arm64` images to Docker Hub and GHCR.
 
-Before tagging a release, update every workspace package version and the image examples in this README and `docker-compose.yml`. Run `cargo update --workspace --offline` to synchronize `Cargo.lock` without upgrading registry dependencies, then run the checks above and `node --test web/app.test.js`. Commit the synchronized files before pushing the matching `vX.Y.Z` tag.
+Before tagging a release, update every workspace package version and the image examples in this README and `docker-compose.yml`. Run `cargo update --workspace --offline` to synchronize `Cargo.lock` without upgrading registry dependencies, then run the checks above and `npm ci --prefix frontend`, `npm test --prefix frontend`, `npm run build --prefix frontend`, `npm audit --prefix frontend --omit=dev`, and `cargo audit`. Commit the synchronized files before pushing the matching `vX.Y.Z` tag.
 
 To rebuild an existing release tag without moving it, run `gh workflow run docker-publish.yml --ref main -f release_tag=vX.Y.Z`. The workflow checks out that tag, verifies its version, and labels the images with its actual commit.
 
 ## License
 
 [MIT](LICENSE)
+
+### Frontend development
+
+The five Web UI pages use React 19, Vite and locally vendored [Ovio](https://github.com/JanaSundar/ovio) components. Choose Minimal, Craft, Retro or Toy from the toolbar; Toy is the default. Style, light/dark/system theme, and Chinese/English language preferences are saved independently in the browser.
+
+```bash
+npm ci --prefix frontend
+npm run dev --prefix frontend    # proxies /api to 127.0.0.1:8080
+npm test --prefix frontend
+npm run build --prefix frontend  # generates web/dist, embedded by Rust
+cargo build --locked
+```
+
+Commit `web/dist` together with frontend source changes. CI rebuilds the frontend and rejects stale generated assets. Docker builds the frontend in a Node stage; the final image and executable require no Node runtime or external asset service. Third-party component source and license notices are recorded in `THIRD_PARTY_NOTICES.md`.

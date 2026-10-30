@@ -19,3 +19,7 @@
 
 # Web research cache
 /.firecrawl/
+
+# Frontend dependencies and local browser artifacts
+/frontend/node_modules/
+/frontend/coverage/

@@ -1,0 +1,125 @@
+/*
+ * Ovio theme: the four worlds as CSS variables.
+ * Every Ovio component sets data-ovio-world on its root, so these resolve with or without a provider.
+ * Fonts are referenced through variables; load them with next/font (see the docs) or Google Fonts.
+ */
+
+[data-ovio-world] {
+  --ovio-font-geist: var(--font-geist, "Geist"), system-ui, sans-serif;
+  --ovio-font-geist-mono:
+    var(--font-geist-mono, "Geist Mono"), ui-monospace, monospace;
+  --ovio-font-bricolage:
+    var(--font-bricolage, "Bricolage Grotesque"), system-ui, sans-serif;
+  --ovio-font-plex-mono:
+    var(--font-plex-mono, "IBM Plex Mono"), ui-monospace, monospace;
+  --ovio-font-caveat: var(--font-caveat, "Caveat"), cursive;
+  --ovio-font-vt323: var(--font-vt323, "VT323"), ui-monospace, monospace;
+  --ovio-font-archivo: var(--font-archivo, "Archivo"), system-ui, sans-serif;
+}
+
+/* Minimal: clean digital objects. Whitespace, thin rules, neutral colour. */
+[data-ovio-world="minimal"] {
+  --ovio-stage: #fafaf8;
+  --ovio-surface: #ffffff;
+  --ovio-ink: #161614;
+  --ovio-ink-2: #55534d;
+  --ovio-muted: #77756e;
+  --ovio-faint: #99968e;
+  --ovio-line: #e6e4df;
+  --ovio-line-2: #eeece8;
+  --ovio-track: #efede8;
+  --ovio-accent: #161614;
+  --ovio-on-accent: #f5f4f0;
+  --ovio-radius: 8px;
+  --ovio-font: var(--ovio-font-geist);
+  --ovio-mono: var(--ovio-font-geist-mono);
+}
+
+/* Craft: crafted physical artefacts. Cream paper, tape, printed labels, soft layered shadows. */
+[data-ovio-world="craft"] {
+  --ovio-stage: #efe7d8;
+  --ovio-surface: #fbf7ef;
+  --ovio-surface-2: #f1e6d2;
+  --ovio-ink: #2a1f14;
+  --ovio-ink-2: #6e5a45;
+  --ovio-muted: #8a7258;
+  --ovio-faint: #c9b9a0;
+  --ovio-line: rgba(42, 31, 20, 0.25);
+  --ovio-track: #fbf7ef;
+  --ovio-accent: #e0713a;
+  --ovio-accent-deep: #b8471f;
+  --ovio-on-accent: #fff6ea;
+  --ovio-tape: rgba(240, 220, 160, 0.82);
+  --ovio-shadow:
+    0 2px 4px rgba(70, 45, 20, 0.12), 0 18px 34px -12px rgba(70, 45, 20, 0.4);
+  --ovio-radius: 10px;
+  --ovio-font: var(--ovio-font-bricolage);
+  --ovio-hand: var(--ovio-font-caveat);
+  --ovio-mono: var(--ovio-font-plex-mono);
+}
+
+/* Retro: nostalgic digital artefacts. Phosphor, pixel borders, terminal output. */
+[data-ovio-world="retro"] {
+  --ovio-stage: #061108;
+  --ovio-surface: #0a1f0e;
+  --ovio-ink: #6dff8a;
+  --ovio-ink-2: #3fae55;
+  --ovio-muted: #3fae55;
+  --ovio-faint: #1d5a2b;
+  --ovio-line: #3fae55;
+  --ovio-track: #0a1f0e;
+  --ovio-accent: #4fdc68;
+  --ovio-on-accent: #061108;
+  --ovio-glow: 0 0 6px rgba(80, 255, 120, 0.55);
+  --ovio-radius: 0px;
+  --ovio-font: var(--ovio-font-vt323);
+  --ovio-mono: var(--ovio-font-vt323);
+}
+
+/* Toy: playful physical objects. Molded plastic, raised keys, knobs, pegs and blocks. */
+[data-ovio-world="toy"] {
+  --ovio-stage: #e3dfd5;
+  --ovio-surface: #f8f5ef;
+  --ovio-ink: #1e1d1a;
+  --ovio-ink-2: #55524a;
+  --ovio-muted: #6b665b;
+  --ovio-faint: #a69e90;
+  --ovio-line: #d2ccbf;
+  --ovio-track: #d6d0c3;
+  --ovio-accent: #2c55e0;
+  --ovio-accent-deep: #1a36a3;
+  --ovio-red: #ef4f2b;
+  --ovio-red-deep: #b5311a;
+  --ovio-yellow: #f4b52a;
+  --ovio-yellow-deep: #b9821a;
+  --ovio-on-accent: #ffffff;
+  --ovio-radius: 14px;
+  --ovio-font: var(--ovio-font-archivo);
+  --ovio-mono: var(--ovio-font-plex-mono);
+}
+
+/* Keyboard focus shows no outline or highlight inside a component. */
+[data-ovio-world] :focus-visible {
+  outline: none;
+}
+
+/* World stages: the surface a component sits on in demos. */
+.ovio-stage[data-ovio-world="toy"] {
+  background-image: radial-gradient(
+    circle,
+    rgba(60, 45, 20, 0.09) 2px,
+    transparent 2.5px
+  );
+  background-size: 22px 22px;
+}
+
+.ovio-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.3) 0 1px,
+    transparent 1px 3px
+  );
+}

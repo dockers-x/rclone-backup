@@ -1,0 +1,3 @@
+web/dist/* linguist-generated=true
+# Third-party CSS template literals retain upstream whitespace in the JS bundle.
+web/dist/app.js whitespace=-blank-at-eol
