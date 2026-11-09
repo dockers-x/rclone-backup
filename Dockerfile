@@ -16,7 +16,7 @@ COPY web ./web
 COPY --from=frontend /web/dist ./web/dist
 RUN cargo build --locked --release -p rclone-backup
 
-FROM rclone/rclone:1.75.2
+FROM rclone/rclone:1.76.0
 
 ENV RCLONE_CONFIG=/config/rclone/rclone.conf \
     RCLONE_BACKUP_ADDR=0.0.0.0:8080 \
