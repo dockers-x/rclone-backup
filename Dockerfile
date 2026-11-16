@@ -5,7 +5,7 @@ RUN npm ci
 COPY frontend ./
 RUN npm run build
 
-FROM rust:1.99.1-alpine AS builder
+FROM rust:1.100.0-alpine AS builder
 
 WORKDIR /src
 RUN apk add --no-cache musl-dev
